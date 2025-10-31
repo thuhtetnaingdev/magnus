@@ -1,4 +1,5 @@
 import { toolRegistry } from "../tools/tool.registry.js";
+import { getParameterDescriptions } from "../tools/tool.base.js";
 
 export function getToolCallingSystemPrompt(): string {
   const tools = toolRegistry.getAllTools();
@@ -9,7 +10,7 @@ export function getToolCallingSystemPrompt(): string {
 TOOL: ${tool.name}
 DESCRIPTION: ${tool.description}
 PARAMETERS:
-${Object.entries(tool.parameters)
+${Object.entries(getParameterDescriptions(tool.parameters))
   .map(([key, desc]) => `  - ${key}: ${desc}`)
   .join("\n")}
 `
@@ -86,11 +87,12 @@ You MUST follow this EXACT format for ALL responses. No exceptions, no variation
 1. **ALWAYS use grep tool first** to search for relevant code before making assumptions
 2. **Never assume code structure** - verify with tools
 3. **Include context** - provide file paths and line numbers from tool results
-4. **Analyze patterns** - use search_files to understand code patterns and relationships
+4. **Analyze patterns** - use search tools to understand code patterns and relationships
 
 ### Tool-Specific Guidelines
 - **For grep tool**: pattern must be a valid regex string, path defaults to ".", include is optional file pattern
 - **For glob tool**: pattern must be a valid glob pattern, path defaults to ".", include is optional file pattern
+- **For tree tool**: path defaults to ".", maxDepth defaults to 3 (1-10), includeHidden defaults to false
 - **For all tools**: provide required parameters exactly as specified
 
 ### Handling Tool Results
@@ -124,8 +126,8 @@ The user wants to find authentication-related functions. I need to search the co
 
 ### RESPONSE
 Based on the search results, I found authentication functions in these files:
-- src/auth.ts:15 - loginUser()
-- src/middleware.ts:42 - authenticateToken()
+- auth.ts:15 - loginUser()
+- middleware.ts:42 - authenticateToken()
 
 ### Example 2: File Search Task
 User: Find all TypeScript files in the src directory
@@ -141,34 +143,34 @@ The user wants to find all TypeScript files in the src directory. I should use t
 
 ### RESPONSE
 I found the following TypeScript files in the src directory:
-- src/env.ts
-- src/index.ts
-- src/utils/logger.ts
+- env.ts
+- index.ts
+- utils/logger.ts
 
-### Example 3: Recursive File Search
-User: Find all TypeScript files recursively in the src directory
+### Example 3: Project Structure Overview
+User: Show me the project structure to understand the codebase
 
 ### THINKING
-The user wants to find all TypeScript files recursively in the src directory, including subdirectories. I should use the glob tool with a recursive pattern.
+The user wants to understand the project structure. The tree tool is perfect for this as it generates a hierarchical view of the project directory with relevant files and directories.
 
 ### ACTION
-<glob>
-<pattern>**/*.ts</pattern>
-<path>src</path>
-</glob>
+<tree>
+<path>.</path>
+<maxDepth>3</maxDepth>
+<includeHidden>false</includeHidden>
+</tree>
 
 ### RESPONSE
-I found the following TypeScript files recursively in the src directory:
-- src/env.ts
-- src/llm/client.llm.ts
-- src/llm/history.llm.ts
-- src/prompts/system.tool-calling.ts
-- src/tools/glob.tool.ts
-- src/tools/grep.tool.ts
-- src/tools/tool.registry.ts
-- src/utils/logger.ts
+Based on the tree structure, this appears to be a TypeScript-based tool project with the following organization:
+- src/ - Main source code directory
+- logs/ - Application logs
+- Configuration files (package.json, tsconfig.json)
+- Documentation (README.md)
 
-### Example 2: Direct Answer (No Tool)
+The project follows standard Node.js/TypeScript conventions with proper separation of concerns.
+
+
+### Example 4: Direct Answer (No Tool)
 User: What is 2+2?
 
 ### THINKING

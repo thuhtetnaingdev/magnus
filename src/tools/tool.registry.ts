@@ -1,7 +1,11 @@
-import { grepTool, type GrepTool } from "./grep.tool.js";
-import { globTool, type GlobTool } from "./glob.tool.js";
+import { grepTool } from "./grep.tool.js";
+import { globTool } from "./glob.tool.js";
+import { readTool } from "./read.tool.js";
+import { treeTool } from "./tree.tool.js";
+import { aiderTool } from "./aider.tool.js";
+import { getParameterDescriptions, type ToolDefinition } from "./tool.base.js";
 
-export type Tool = GrepTool | GlobTool;
+export type Tool = typeof grepTool | typeof globTool | typeof readTool | typeof treeTool | typeof aiderTool;
 
 export class ToolRegistry {
   private tools: Map<string, Tool> = new Map();
@@ -9,6 +13,9 @@ export class ToolRegistry {
   constructor() {
     this.registerTool(grepTool);
     this.registerTool(globTool);
+    this.registerTool(readTool);
+    this.registerTool(treeTool);
+    this.registerTool(aiderTool);
   }
 
   registerTool(tool: Tool): void {

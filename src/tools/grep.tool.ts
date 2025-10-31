@@ -1,36 +1,36 @@
-export interface GrepTool {
-  name: "grep";
-  description: "Search for patterns in files using regular expressions";
-  parameters: {
-    pattern: string;
-    path?: string;
-    include?: string;
-  };
-  execute: (params: {
-    pattern: string;
-    path?: string;
-    include?: string;
-  }) => Promise<{
-    matches: Array<{
-      file: string;
-      line: number;
-      content: string;
-    }>;
-  }>;
-}
-
+import { z } from "zod";
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join, resolve } from "path";
+import { createTool, type ToolDefinition } from "./tool.base.js";
 
-export const grepTool: GrepTool = {
-  name: "grep",
+// Zod schema for grep tool parameters
+const GrepParametersSchema = z.object({
+  pattern: z
+    .string()
+    .min(1, "Pattern cannot be empty")
+    .describe("The regex pattern to search for in file contents"),
+  path: z
+    .string()
+    .optional()
+    .default(".")
+    .describe("The directory to search in (defaults to current working directory)"),
+  include: z
+    .string()
+    .optional()
+    .describe("File pattern to include in the search (e.g. '*.js', '*.{ts,tsx}')"),
+});
+
+export type GrepParameters = z.infer<typeof GrepParametersSchema>;
+
+export interface GrepTool extends ToolDefinition<typeof GrepParametersSchema> {
+  name: "grep";
+}
+
+export const grepTool = createTool({
+  name: "grep" as const,
   description: "Search for patterns in files using regular expressions",
-  parameters: {
-    pattern: "The regex pattern to search for in file contents",
-    path: "The directory to search in (defaults to current working directory)",
-    include: "File pattern to include in the search (e.g. '*.js', '*.{ts,tsx}')",
-  },
-  execute: async ({ pattern, path = ".", include }) => {
+  parameters: GrepParametersSchema,
+  execute: async ({ pattern, path, include }) => {
     const searchPath = resolve(path);
     const regex = new RegExp(pattern, "g");
     const matches: Array<{
@@ -109,4 +109,4 @@ export const grepTool: GrepTool = {
     
     return { matches };
   },
-};
+});

@@ -11,14 +11,11 @@ import { toolRegistry } from "./tools/tool.registry.js";
 import { getToolCallingSystemPrompt } from "./prompts/system.tool-calling.js";
 import { ConversationHistory, type Message } from "./llm/history.llm.js";
 import logger from "./utils/logger.js";
+import { z } from "zod";
 
 interface ToolCall {
   name: string;
-  parameters: {
-    pattern: string;
-    path?: string;
-    include?: string;
-  };
+  parameters: Record<string, any>;
 }
 
 interface ParsedResponse {
@@ -88,22 +85,22 @@ function App() {
     const result: ParsedResponse = {};
 
     if (thinkingMatch) {
-      result.thinking = thinkingMatch[1].trim();
+      result.thinking = thinkingMatch[1];
     }
 
     // Try to find XML tool calls in different formats
     let toolCallText = "";
-    
+
     // First try: XML in ACTION section
     if (actionMatch) {
-      const actionContent = actionMatch[1].trim();
+      const actionContent = actionMatch[1];
       const xmlMatch = actionContent.match(/<([\w*]+)>[\s\S]*?<\/\1>/);
       if (xmlMatch) {
         toolCallText = actionContent;
         logger.debug(`Found action section with XML: ${actionContent}`);
       }
     }
-    
+
     // Second try: Direct XML without ACTION section
     if (!toolCallText) {
       const directXmlMatch = content.match(/<([\w*]+)>[\s\S]*?<\/\1>/);
@@ -130,7 +127,7 @@ function App() {
         const paramMatches = toolCallText.matchAll(/<(\w+)>([^<]*)<\/\1>/g);
         for (const match of paramMatches) {
           const paramName = match[1];
-          const paramValue = match[2].trim();
+          const paramValue = match[2];
           parameters[paramName] = paramValue;
         }
 
@@ -146,10 +143,52 @@ function App() {
     }
 
     if (responseMatch) {
-      result.response = responseMatch[1].trim();
+      result.response = responseMatch[1];
     }
 
     return Object.keys(result).length > 0 ? result : null;
+  };
+
+  const convertParametersToTypes = (parameters: Record<string, string>, schema: any): Record<string, any> => {
+    const result: Record<string, any> = {};
+    
+    for (const [key, value] of Object.entries(parameters)) {
+      if (schema instanceof z.ZodObject) {
+        const fieldSchema = schema.shape[key];
+        if (fieldSchema) {
+          // Get the actual type by unwrapping ZodDefault if present
+          let actualSchema = fieldSchema;
+          while (actualSchema._def && actualSchema._def.typeName === 'ZodDefault') {
+            actualSchema = actualSchema._def.innerType;
+          }
+          
+          // Get the inner type for optional fields
+          if (actualSchema._def && actualSchema._def.typeName === 'ZodOptional') {
+            actualSchema = actualSchema._def.innerType;
+          }
+          
+          // Convert based on actual Zod schema type
+          if (actualSchema._def && actualSchema._def.typeName === 'ZodNumber') {
+            result[key] = Number(value);
+          } else if (actualSchema._def && actualSchema._def.typeName === 'ZodBoolean') {
+            // Handle boolean values - convert strings like "true", "false", "1", "0"
+            const lowerValue = value.toLowerCase();
+            result[key] = lowerValue === 'true' || lowerValue === '1';
+          } else {
+            // Keep as string for other types
+            result[key] = value;
+          }
+        } else {
+          // Unknown parameter, keep as string
+          result[key] = value;
+        }
+      } else {
+        // No schema info, keep as string
+        result[key] = value;
+      }
+    }
+    
+    return result;
   };
 
   const executeTool = async (toolCall: ToolCall): Promise<string> => {
@@ -160,12 +199,16 @@ function App() {
     }
 
     try {
+      // Convert string parameters to appropriate types based on tool schema
+      const typedParameters = convertParametersToTypes(toolCall.parameters, tool.parameters);
+      
       logger.debug(
         `Executing tool: ${toolCall.name} with parameters: ${JSON.stringify(
-          toolCall.parameters
+          typedParameters
         )}`
       );
-      const result = await tool.execute(toolCall.parameters);
+      // The tool now handles its own parameter validation internally
+      const result = await tool.execute(typedParameters as any);
       logger.debug(
         `Tool ${toolCall.name} executed successfully, result size: ${
           JSON.stringify(result).length
@@ -216,10 +259,16 @@ function App() {
       };
 
       let assistantResponse = "";
+      let buffer = "";
 
       await invokeLLMWithStream(provider, request, async (chunk) => {
         try {
-          const lines = chunk.split("\n");
+          buffer += chunk;
+          const lines = buffer.split("\n");
+          
+          // Keep the last incomplete line in buffer
+          buffer = lines.pop() || "";
+          
           for (const line of lines) {
             if (line.startsWith("data: ") && line !== "data: [DONE]") {
               const data = JSON.parse(line.slice(6));
@@ -253,7 +302,7 @@ function App() {
       logger.debug(`Assistant response: ${assistantResponse}`);
 
       // After streaming completes, add assistant response to history
-      if (assistantResponse.trim()) {
+      if (assistantResponse) {
         conversationHistory.addMessage("assistant", assistantResponse);
       }
 
@@ -272,7 +321,11 @@ function App() {
         setToolResults((prev) => [...prev, toolResult]);
 
         logger.info(`Tool execution completed: ${parsedResponse.action.name}`);
-        logger.info(`Tool result: ${toolResult.substring(0, 500)}${toolResult.length > 500 ? "..." : ""}`);
+        logger.info(
+          `Tool result: ${toolResult.substring(0, 500)}${
+            toolResult.length > 500 ? "..." : ""
+          }`
+        );
 
         // Add tool result to conversation and get final response
         conversationHistory.addMessage(
@@ -289,9 +342,15 @@ function App() {
         };
 
         let finalResponse = "";
+        let toolBuffer = "";
         await invokeLLMWithStream(provider, toolRequest, (chunk) => {
           try {
-            const lines = chunk.split("\n");
+            toolBuffer += chunk;
+            const lines = toolBuffer.split("\n");
+            
+            // Keep the last incomplete line in buffer
+            toolBuffer = lines.pop() || "";
+            
             for (const line of lines) {
               if (line.startsWith("data: ") && line !== "data: [DONE]") {
                 const data = JSON.parse(line.slice(6));
@@ -324,7 +383,6 @@ function App() {
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to get response from AI";
-      logger.error(`Error in handleSubmit: ${errorMessage}`);
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -360,13 +418,13 @@ function App() {
           </Box>
         )}
         {messages
-          .filter((message) => message.content.trimStart().length > 0)
+          .filter((message) => message.content.trim().length > 0)
           .map((message, index) => (
             <Box key={index} marginBottom={1} flexDirection="row">
               <Text color="cyan">{">"}</Text>
               <Text color="cyan"> </Text>
               <Text color={message.role === "assistant" ? "cyan" : "white"}>
-                {message.content.trimStart()}
+                {message.content}
               </Text>
             </Box>
           ))}

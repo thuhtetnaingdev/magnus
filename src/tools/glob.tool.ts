@@ -1,32 +1,32 @@
-export interface GlobTool {
-  name: "glob";
-  description: "Search for files by name patterns using glob patterns";
-  parameters: {
-    pattern: string;
-    path?: string;
-  };
-  execute: (params: {
-    pattern: string;
-    path?: string;
-  }) => Promise<{
-    files: Array<{
-      path: string;
-      name: string;
-    }>;
-  }>;
-}
-
+import { z } from "zod";
 import { readdirSync, statSync } from "fs";
 import { join, resolve, basename } from "path";
+import { createTool, type ToolDefinition } from "./tool.base.js";
 
-export const globTool: GlobTool = {
-  name: "glob",
+// Zod schema for glob tool parameters
+const GlobParametersSchema = z.object({
+  pattern: z
+    .string()
+    .min(1, "Pattern cannot be empty")
+    .describe("The glob pattern to match files against (e.g. '**/*.ts', 'grep*.ts', '*.tool.ts')"),
+  path: z
+    .string()
+    .optional()
+    .default(".")
+    .describe("The directory to search in (defaults to current working directory)"),
+});
+
+export type GlobParameters = z.infer<typeof GlobParametersSchema>;
+
+export interface GlobTool extends ToolDefinition<typeof GlobParametersSchema> {
+  name: "glob";
+}
+
+export const globTool = createTool({
+  name: "glob" as const,
   description: "Search for files by name patterns using glob patterns",
-  parameters: {
-    pattern: "The glob pattern to match files against (e.g. '**/*.ts', 'grep*.ts', '*.tool.ts')",
-    path: "The directory to search in (defaults to current working directory)",
-  },
-  execute: async ({ pattern, path = "." }) => {
+  parameters: GlobParametersSchema,
+  execute: async ({ pattern, path }) => {
     const searchPath = resolve(path);
     const files: Array<{ path: string; name: string }> = [];
 
@@ -122,4 +122,4 @@ export const globTool: GlobTool = {
     
     return { files };
   },
-};
+});
