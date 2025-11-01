@@ -68,8 +68,6 @@ Create a `.env` file in the root directory with:
 
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
-# Optional: For alternative LLM providers
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
 ```
 
 ## Usage
