@@ -1,6 +1,6 @@
-# Agentic CLI Tool
+# Magnus
 
-An interactive command-line interface that combines the power of LLM integration with a rich terminal UI built on React and Ink. This tool enables intelligent file system operations and code assistance through an agentic architecture.
+An intelligent CLI assistant with agentic capabilities that combines the power of LLM integration with a rich terminal UI built on React and Ink. Magnus enables intelligent file system operations and code assistance through an agentic architecture.
 
 ## Features
 
@@ -22,7 +22,7 @@ An interactive command-line interface that combines the power of LLM integration
 
 ```bash
 git clone <repository-url>
-cd agentic-cli-tool
+cd magnus
 ```
 
 2. Install dependencies:
@@ -78,7 +78,7 @@ npm run start:prod
 ## Project Structure
 
 ```
-agentic-cli-tool/
+magnus/
 ├── src/
 │   ├── components/          # React components for the UI
 │   ├── tools/              # Tool implementations
