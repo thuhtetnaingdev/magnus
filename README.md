@@ -202,7 +202,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 If you encounter any issues or have questions:
 
-- Check the [Issues](https://github.com/your-repo/issues) page
+- Check the [Issues](https://github.com/thuhtetnaingdev/magnus/issues) page
 - Create a new issue with a detailed description
 - Join our community discussions
 
