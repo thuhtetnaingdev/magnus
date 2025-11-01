@@ -14,9 +14,33 @@ An intelligent CLI assistant with agentic capabilities that combines the power o
 
 - Node.js (version 18 or higher)
 - npm (version 8 or higher)
+- aider (AI-powered coding assistant) - required for the aider tool functionality
 - An OpenAI API key or compatible LLM service
 
 ## Installation
+
+### Install aider
+
+Magnus requires aider for its AI-powered code assistance features. Follow the official installation guide at [https://aider.chat/docs/install.html](https://aider.chat/docs/install.html).
+
+**Quick installation methods:**
+
+#### For Mac & Linux:
+```bash
+curl -LsSf https://aider.chat/install.sh | sh
+```
+
+#### For Windows:
+```bash
+powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 | iex"
+```
+
+#### Alternative installation with pip:
+```bash
+python -m pip install aider-chat
+```
+
+### Install Magnus
 
 1. Clone the repository:
 
