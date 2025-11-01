@@ -6,6 +6,7 @@ import {
   invokeLLMWithStream,
   type LLMRequest,
   type LLMProvider,
+  type LLMMessage,
 } from "./llm/client.llm.js";
 import { toolRegistry } from "./tools/tool.registry.js";
 import { getToolCallingSystemPrompt } from "./prompts/system.tool-calling.js";
@@ -49,7 +50,8 @@ function App() {
       }
     } else if (key.backspace || key.delete) {
       setInput((prev) => prev.slice(0, -1));
-    } else if (inputKey && inputKey.length === 1) {
+    } else if (inputKey && inputKey.length > 0) {
+      // Handle paste operations (multiple characters at once)
       setInput((prev) => prev + inputKey);
     }
   });
@@ -61,7 +63,7 @@ function App() {
       setEnv(validatedEnv);
 
       // Initialize conversation history with system prompt
-      const history = new ConversationHistory(getToolCallingSystemPrompt());
+      const history = new ConversationHistory(getToolCallingSystemPrompt(process.cwd(), process.platform));
       setConversationHistory(history);
 
       logger.info("Environment loaded successfully");
@@ -94,10 +96,13 @@ function App() {
     // First try: XML in ACTION section
     if (actionMatch) {
       const actionContent = actionMatch[1];
-      const xmlMatch = actionContent.match(/<([\w*]+)>[\s\S]*?<\/\1>/);
-      if (xmlMatch) {
-        toolCallText = actionContent;
-        logger.debug(`Found action section with XML: ${actionContent}`);
+      // Find ALL tool calls and take the last one (most recent)
+      const xmlMatches = [...actionContent.matchAll(/<([\w*]+)>[\s\S]*?<\/\1>/g)];
+      if (xmlMatches.length > 0) {
+        // Use the last tool call found (most recent)
+        const lastMatch = xmlMatches[xmlMatches.length - 1];
+        toolCallText = lastMatch[0];
+        logger.debug(`Found action section with XML tool call: ${toolCallText}`);
       }
     }
 
@@ -123,12 +128,29 @@ function App() {
         const toolName = toolNameMatch[1];
         const parameters: any = {};
 
-        // Extract all parameter values
-        const paramMatches = toolCallText.matchAll(/<(\w+)>([^<]*)<\/\1>/g);
-        for (const match of paramMatches) {
-          const paramName = match[1];
-          const paramValue = match[2];
-          parameters[paramName] = paramValue;
+        // Extract only parameters from the current tool call
+        // Find the tool opening tag and closing tag to isolate the current tool
+        const toolStart = toolCallText.indexOf(`<${toolName}>`);
+        const toolEnd = toolCallText.indexOf(`</${toolName}>`);
+        
+        if (toolStart !== -1 && toolEnd !== -1) {
+          const toolContent = toolCallText.substring(toolStart, toolEnd + `</${toolName}>`.length);
+          
+          // Extract parameter values only from this tool's content
+          const paramMatches = toolContent.matchAll(/<(\w+)>([^<]*)<\/\1>/g);
+          for (const match of paramMatches) {
+            const paramName = match[1];
+            const paramValue = match[2];
+            parameters[paramName] = paramValue;
+          }
+        } else {
+          // Fallback: extract all parameters (original behavior)
+          const paramMatches = toolCallText.matchAll(/<(\w+)>([^<]*)<\/\1>/g);
+          for (const match of paramMatches) {
+            const paramName = match[1];
+            const paramValue = match[2];
+            parameters[paramName] = paramValue;
+          }
         }
 
         result.action = {
@@ -223,36 +245,21 @@ function App() {
     }
   };
 
-  const handleSubmit = async () => {
-    if (!input.trim() || isLoading || !env) return;
+  const handleRecursiveToolCalling = async (
+    provider: LLMProvider,
+    initialMessages: LLMMessage[],
+    maxIterations: number = 10
+  ): Promise<string> => {
+    let currentMessages = [...initialMessages];
+    let iteration = 0;
 
-    logger.info(
-      `User input received: ${input.substring(0, 50)}${
-        input.length > 50 ? "..." : ""
-      }`
-    );
-
-    if (!conversationHistory) {
-      logger.error("Conversation history not initialized");
-      return;
-    }
-
-    const userMessage: Message = { role: "user", content: input };
-    setMessages((prev) => [...prev, userMessage]);
-    conversationHistory.addMessage("user", input);
-    const userInput = input;
-    setInput("");
-    setIsLoading(true);
-
-    try {
-      const provider: LLMProvider = {
-        apiUrl: `${env.OPENAI_API_BASE}/chat/completions`,
-        apiKey: env.OPENAI_API_KEY,
-      };
+    while (iteration < maxIterations) {
+      iteration++;
+      logger.info(`Starting recursive LLM call iteration ${iteration}`);
 
       const request: LLMRequest = {
         model: env.OPENAI_MODEL,
-        messages: conversationHistory.getHistoryForLLM(),
+        messages: currentMessages,
         stream: true,
         max_tokens: 92000,
         temperature: 0,
@@ -298,12 +305,13 @@ function App() {
         }
       });
 
-      logger.info("Initial LLM response received");
+      logger.info(`LLM response received in iteration ${iteration}`);
       logger.debug(`Assistant response: ${assistantResponse}`);
 
-      // After streaming completes, add assistant response to history
-      if (assistantResponse) {
+      // Add assistant response to conversation history
+      if (assistantResponse && conversationHistory) {
         conversationHistory.addMessage("assistant", assistantResponse);
+        currentMessages.push({ role: "assistant", content: assistantResponse });
       }
 
       // Check if we need to execute a tool
@@ -311,7 +319,7 @@ function App() {
 
       if (parsedResponse?.action) {
         logger.info(
-          `Tool call detected: ${
+          `Tool call detected in iteration ${iteration}: ${
             parsedResponse.action.name
           } with params: ${JSON.stringify(parsedResponse.action.parameters)}`
         );
@@ -327,59 +335,57 @@ function App() {
           }`
         );
 
-        // Add tool result to conversation and get final response
-        conversationHistory.addMessage(
-          "user",
-          `Tool execution result:\n\`\`\`json\n${toolResult}\n\`\`\`\n\nNow provide your final response based on this tool result.`
-        );
+        // Add tool result to conversation for next iteration
+        const toolResultMessage = `Tool execution result:\n\`\`\`json\n${toolResult}\n\`\`\``;
+        if (conversationHistory) {
+          conversationHistory.addMessage("user", toolResultMessage);
+        }
+        currentMessages.push({ role: "user", content: toolResultMessage });
 
-        const toolRequest: LLMRequest = {
-          model: env.OPENAI_MODEL,
-          messages: conversationHistory.getHistoryForLLM(),
-          stream: true,
-          max_tokens: 92000,
-          temperature: 0,
-        };
-
-        let finalResponse = "";
-        let toolBuffer = "";
-        await invokeLLMWithStream(provider, toolRequest, (chunk) => {
-          try {
-            toolBuffer += chunk;
-            const lines = toolBuffer.split("\n");
-            
-            // Keep the last incomplete line in buffer
-            toolBuffer = lines.pop() || "";
-            
-            for (const line of lines) {
-              if (line.startsWith("data: ") && line !== "data: [DONE]") {
-                const data = JSON.parse(line.slice(6));
-                const content = data.choices?.[0]?.delta?.content;
-                if (content) {
-                  finalResponse += content;
-                  setMessages((prev) => {
-                    const newMessages = [...prev];
-                    if (
-                      newMessages[newMessages.length - 1]?.role === "assistant"
-                    ) {
-                      newMessages[newMessages.length - 1].content =
-                        finalResponse;
-                    } else {
-                      newMessages.push({
-                        role: "assistant",
-                        content: finalResponse,
-                      });
-                    }
-                    return newMessages;
-                  });
-                }
-              }
-            }
-          } catch (e) {
-            // Ignore parsing errors for streaming
-          }
-        });
+        logger.info(`Continuing to next iteration for additional tool calls`);
+      } else {
+        // No tool call detected - this is the final response
+        logger.info(`No tool call detected in iteration ${iteration} - ending recursion`);
+        return assistantResponse;
       }
+    }
+
+    logger.warn(`Reached maximum iteration limit of ${maxIterations}`);
+    return "Maximum iteration limit reached. Please try a more specific query.";
+  };
+
+  const handleSubmit = async () => {
+    if (!input.trim() || isLoading || !env) return;
+
+    logger.info(
+      `User input received: ${input.substring(0, 50)}${
+        input.length > 50 ? "..." : ""
+      }`
+    );
+
+    if (!conversationHistory) {
+      logger.error("Conversation history not initialized");
+      return;
+    }
+
+    const userMessage: Message = { role: "user", content: input };
+    setMessages((prev) => [...prev, userMessage]);
+    conversationHistory.addMessage("user", input);
+    const userInput = input;
+    setInput("");
+    setIsLoading(true);
+
+    try {
+      const provider: LLMProvider = {
+        apiUrl: `${env.OPENAI_API_BASE}/chat/completions`,
+        apiKey: env.OPENAI_API_KEY,
+      };
+
+      // Start recursive tool calling process
+      await handleRecursiveToolCalling(
+        provider,
+        conversationHistory.getHistoryForLLM()
+      );
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to get response from AI";

@@ -100,6 +100,22 @@ Agents must follow this exact format:
 - Each parameter on separate lines
 - One blank line between sections
 
+### Recursive Tool Calling Workflow
+
+The system now supports recursive tool calling, allowing the LLM to make multiple tool calls in sequence:
+
+1. **Initial Request**: User sends query
+2. **LLM Response**: LLM analyzes and may include tool call in ACTION section
+3. **Tool Execution**: System executes the tool and gets result
+4. **Recursive Check**: If tool call detected, result is added to conversation and LLM is called again
+5. **Iteration**: Process repeats (max 10 iterations) until no more tool calls
+6. **Final Response**: LLM provides final answer in RESPONSE section
+
+This enables complex multi-step workflows like:
+- Search for files → Read specific file → Analyze content
+- Find patterns → Get more context → Provide comprehensive answer
+- Multiple searches with refined parameters based on previous results
+
 ## Development Workflow
 
 ### Adding New Tools
@@ -153,6 +169,8 @@ export const myTool = createTool({
 - **Type Safety**: Parameter types are enforced at runtime with descriptive error messages
 - **Default Values**: Zod schemas can define default values for optional parameters
 - **Parameter Descriptions**: Descriptions are extracted from Zod schemas for the system prompt
+- **Recursive Tool Calling**: The system supports recursive tool calling - LLM can continue calling tools until it has all needed information
+- **Maximum Iterations**: Recursive calls limited to 10 iterations to prevent infinite loops
 - Tools run synchronously in the main thread
 - Large files (>1MB) are skipped in grep searches
 - Binary files are automatically skipped

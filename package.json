@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node --esm src/index.tsx",
+    "dev": "ts-node --esm --experimental-specifier-resolution=node src/index.tsx",
     "demo": "echo 'Make sure to set OPENAI_API_KEY environment variable first' && npm start",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
