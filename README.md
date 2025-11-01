@@ -150,24 +150,6 @@ AI-powered code assistance
 The application can be configured through:
 
 - **Environment variables** (API keys, service URLs)
-- **Config file** (`config.json` in the project root)
-- **Command-line flags** (use `--help` for options)
-
-### Example Configuration
-
-```json
-{
-  "llm": {
-    "provider": "openai",
-    "model": "gpt-4",
-    "maxTokens": 2000
-  },
-  "tools": {
-    "maxResults": 100,
-    "timeout": 30000
-  }
-}
-```
 
 ## Contributing
 
