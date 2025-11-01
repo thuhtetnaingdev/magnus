@@ -1,4 +1,4 @@
-import winston from "winston";
+import winston from 'winston';
 
 // Define log levels
 const levels = {
@@ -11,18 +11,18 @@ const levels = {
 
 // Define log level based on environment
 const level = () => {
-  const env = process.env.NODE_ENV || "development";
-  const isDevelopment = env === "development";
-  return isDevelopment ? "debug" : "warn";
+  const env = process.env.NODE_ENV || 'development';
+  const isDevelopment = env === 'development';
+  return isDevelopment ? 'debug' : 'warn';
 };
 
 // Define colors for each level
 const colors = {
-  error: "red",
-  warn: "yellow",
-  info: "green",
-  http: "magenta",
-  debug: "white",
+  error: 'red',
+  warn: 'yellow',
+  info: 'green',
+  http: 'magenta',
+  debug: 'white',
 };
 
 // Add colors to Winston
@@ -30,24 +30,20 @@ winston.addColors(colors);
 
 // Define the format for the logs
 const format = winston.format.combine(
-  winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss:ms" }),
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
   winston.format.colorize({ all: true }),
-  winston.format.printf(
-    (info) => `${info.timestamp} ${info.level}: ${info.message}`
-  )
+  winston.format.printf(info => `${info.timestamp} ${info.level}: ${info.message}`)
 );
 
 // Define which transports the logger must use to print out messages
 const transports = [
-  // Allow the use of the console to print the messages
-  new winston.transports.Console(),
   // Allow to print all the error level messages inside the error.log file
   new winston.transports.File({
-    filename: "logs/error.log",
-    level: "error",
+    filename: 'logs/error.log',
+    level: 'error',
   }),
   // Allow to print all the error message inside the all.log file
-  new winston.transports.File({ filename: "logs/all.log" }),
+  new winston.transports.File({ filename: 'logs/all.log' }),
 ];
 
 // Create the logger instance

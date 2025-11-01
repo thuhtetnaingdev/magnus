@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 export interface ToolDefinition<TParams extends z.ZodTypeAny> {
   name: string;
@@ -24,7 +24,7 @@ export function getParameterDescriptions<TParams extends z.ZodTypeAny>(
   schema: TParams
 ): Record<string, string> {
   const descriptions: Record<string, string> = {};
-  
+
   if (schema instanceof z.ZodObject) {
     const shape = schema.shape;
     for (const [key, field] of Object.entries(shape)) {
@@ -35,6 +35,6 @@ export function getParameterDescriptions<TParams extends z.ZodTypeAny>(
       }
     }
   }
-  
+
   return descriptions;
 }

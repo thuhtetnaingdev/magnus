@@ -23,14 +23,14 @@ This tool integrates aider (https://aider.chat) into the agentic tool calling sy
 ```typescript
 // Edit all files to add error handling
 await aiderTool.execute({
-  instruction: "Add comprehensive error handling to all functions",
+  instruction: 'Add comprehensive error handling to all functions',
 });
 
 // Edit specific files
 await aiderTool.execute({
-  instruction: "Refactor the UserService class to use dependency injection",
-  files: ["src/services/user.service.ts", "src/services/user.service.test.ts"],
-  model: "gpt-4",
+  instruction: 'Refactor the UserService class to use dependency injection',
+  files: ['src/services/user.service.ts', 'src/services/user.service.test.ts'],
+  model: 'gpt-4',
 });
 ```
 
@@ -49,6 +49,7 @@ await aiderTool.execute({
 ## Aider Flags Used
 
 The tool automatically uses these aider flags:
+
 - `--yes`: Auto-confirm all prompts
 - `--no-auto-commits`: Don't auto-commit changes
 - `--no-git`: Don't use git integration

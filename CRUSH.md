@@ -9,12 +9,14 @@ This is a TypeScript CLI application that implements an interactive agentic tool
 ## Essential Commands
 
 ### Development
+
 - `npm run dev` - Run development server with ts-node
 - `npm run build` - Build TypeScript to JavaScript
 - `npm start` - Run built application
 - `npm run demo` - Run demo with environment variable check
 
 ### Environment Setup
+
 - Copy `.env.example` to `.env` and set required environment variables:
   - `OPENAI_API_KEY` - Required for LLM API access
   - `OPENAI_API_BASE` - Optional, defaults to "https://api.openai.com/v1"
@@ -42,6 +44,7 @@ src/
 ## Code Patterns and Conventions
 
 ### TypeScript Configuration
+
 - **Module System**: ES Modules (`"type": "module"`)
 - **Target**: ES2020
 - **JSX**: React JSX with `"jsx": "react-jsx"`
@@ -49,6 +52,7 @@ src/
 - **Output**: `dist/` directory
 
 ### Tool System Architecture
+
 - **Zod-Based Validation**: Tools use Zod schemas for parameter validation and descriptions
 - **Tool Interface**: Each tool implements `ToolDefinition` with Zod schema for parameters
 - **Registry Pattern**: Central tool registry manages available tools
@@ -56,6 +60,7 @@ src/
 - **Automatic Validation**: Parameter validation happens automatically via Zod schemas
 
 ### Key Dependencies
+
 - **React/Ink**: CLI UI framework
 - **Winston**: Structured logging
 - **Zod**: Environment validation
@@ -64,6 +69,7 @@ src/
 ## Tool System Details
 
 ### Available Tools
+
 1. **grep** - Search file contents with regex patterns
    - Parameters: `pattern` (required), `path` (optional), `include` (optional file pattern)
    - Recursively searches directories, skips `node_modules` and `.git`
@@ -78,6 +84,7 @@ src/
    - Returns formatted content with 1-based line numbers
 
 ### Tool Calling Format
+
 Agents must follow this exact format:
 
 ```
@@ -95,6 +102,7 @@ Agents must follow this exact format:
 ```
 
 **Critical Requirements**:
+
 - Section headers must be exactly `### THINKING`, `### ACTION`, `### RESPONSE`
 - ACTION section contains ONLY XML tool call
 - Each parameter on separate lines
@@ -112,6 +120,7 @@ The system now supports recursive tool calling, allowing the LLM to make multipl
 6. **Final Response**: LLM provides final answer in RESPONSE section
 
 This enables complex multi-step workflows like:
+
 - Search for files → Read specific file → Analyze content
 - Find patterns → Get more context → Provide comprehensive answer
 - Multiple searches with refined parameters based on previous results
@@ -119,6 +128,7 @@ This enables complex multi-step workflows like:
 ## Development Workflow
 
 ### Adding New Tools
+
 1. Create tool file in `src/tools/` using the Zod-based pattern
 2. Define Zod schema for parameters with descriptions
 3. Use `createTool` helper from `tool.base.ts`
@@ -127,18 +137,19 @@ This enables complex multi-step workflows like:
 6. Parameter descriptions are automatically extracted from Zod schemas for the system prompt
 
 ### Zod Tool Pattern Example
+
 ```typescript
-import { z } from "zod";
-import { createTool } from "./tool.base.js";
+import { z } from 'zod';
+import { createTool } from './tool.base.js';
 
 const MyToolParametersSchema = z.object({
-  pattern: z.string().min(1).describe("Pattern description"),
-  path: z.string().optional().default(".").describe("Path description"),
+  pattern: z.string().min(1).describe('Pattern description'),
+  path: z.string().optional().default('.').describe('Path description'),
 });
 
 export const myTool = createTool({
-  name: "mytool" as const,
-  description: "Tool description",
+  name: 'mytool' as const,
+  description: 'Tool description',
   parameters: MyToolParametersSchema,
   execute: async ({ pattern, path }) => {
     // Implementation with validated parameters
@@ -147,11 +158,13 @@ export const myTool = createTool({
 ```
 
 ### Testing
+
 - Current test script is placeholder: `npm test`
 - Manual testing via CLI: `npm run dev`
 - Check logs in `logs/` directory for debugging
 
 ### Building and Running
+
 1. Set environment variables in `.env`
 2. `npm run build` to compile TypeScript
 3. `npm start` to run the application
@@ -160,11 +173,13 @@ export const myTool = createTool({
 ## Gotchas and Important Notes
 
 ### Environment Variables
+
 - Application fails to start without `OPENAI_API_KEY`
 - Environment validation happens at startup via Zod schema
 - Logs show environment loading status
 
 ### Tool Execution
+
 - **Zod Validation**: All tool parameters are automatically validated using Zod schemas
 - **Type Safety**: Parameter types are enforced at runtime with descriptive error messages
 - **Default Values**: Zod schemas can define default values for optional parameters
@@ -179,6 +194,7 @@ export const myTool = createTool({
 ### Tool Usage Examples
 
 #### Read Tool Examples
+
 ```xml
 <!-- Read entire file -->
 <read>
@@ -200,6 +216,7 @@ export const myTool = createTool({
 ```
 
 #### Grep Tool Examples
+
 ```xml
 <!-- Search for functions -->
 <grep>
@@ -215,6 +232,7 @@ export const myTool = createTool({
 ```
 
 #### Glob Tool Examples
+
 ```xml
 <!-- Find all TypeScript files -->
 <glob>
@@ -229,12 +247,14 @@ export const myTool = createTool({
 ```
 
 ### UI/UX
+
 - CLI uses React/Ink for interactive interface
 - Press `Enter` to submit input
 - Press `Escape` or `Ctrl+C` to exit
 - Real-time streaming of LLM responses
 
 ### Logging
+
 - Winston logger configured for development/production
 - Logs to console and files in `logs/` directory
 - Development: debug level, Production: warn level

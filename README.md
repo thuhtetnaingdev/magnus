@@ -19,17 +19,20 @@ An interactive command-line interface that combines the power of LLM integration
 ## Installation
 
 1. Clone the repository:
+
 ```bash
 git clone <repository-url>
 cd agentic-cli-tool
 ```
 
 2. Install dependencies:
+
 ```bash
 npm install
 ```
 
 3. Set up environment variables:
+
 ```bash
 cp .env.example .env
 # Edit .env and add your API keys
@@ -50,6 +53,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
 ### Basic Usage
 
 Run the interactive CLI:
+
 ```bash
 npm start
 ```
@@ -57,6 +61,7 @@ npm start
 ### Development Mode
 
 Run with hot reload for development:
+
 ```bash
 npm run dev
 ```
@@ -64,6 +69,7 @@ npm run dev
 ### Build and Run
 
 Build the project and run the compiled version:
+
 ```bash
 npm run build
 npm run start:prod
@@ -88,27 +94,37 @@ agentic-cli-tool/
 ## Available Tools
 
 ### grep
+
 Search for patterns in files using regex
+
 - **Usage**: Search file contents with regular expressions
 - **Options**: Case-sensitive/insensitive, file type filtering
 
 ### glob
+
 File pattern matching and listing
+
 - **Usage**: Find files using glob patterns (e.g., `**/*.ts`)
 - **Options**: Recursive search, exclude patterns
 
 ### read
+
 Read and display file contents
+
 - **Usage**: View file contents with syntax highlighting
 - **Options**: Line numbers, encoding selection
 
 ### tree
+
 Display directory structure
+
 - **Usage**: Visualize folder hierarchy
 - **Options**: Depth limiting, file size display
 
 ### aider
+
 AI-powered code assistance
+
 - **Usage**: Get help with code modifications and explanations
 - **Options**: Context-aware suggestions, multi-file operations
 
@@ -179,6 +195,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Support
 
 If you encounter any issues or have questions:
+
 - Check the [Issues](https://github.com/your-repo/issues) page
 - Create a new issue with a detailed description
 - Join our community discussions

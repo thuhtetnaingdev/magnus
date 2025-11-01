@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-import { useState, useEffect } from "react";
-import { render, Text, Box, useInput, useApp } from "ink";
-import { validateEnv } from "./env.js";
+import { useState, useEffect } from 'react';
+import { render, Text, Box, useInput, useApp } from 'ink';
+import { validateEnv } from './env.js';
 import {
   invokeLLMWithStream,
   type LLMRequest,
   type LLMProvider,
   type LLMMessage,
-} from "./llm/client.llm.js";
-import { toolRegistry } from "./tools/tool.registry.js";
-import { getToolCallingSystemPrompt } from "./prompts/system.tool-calling.js";
-import { ConversationHistory, type Message } from "./llm/history.llm.js";
-import logger from "./utils/logger.js";
-import { z } from "zod";
+} from './llm/client.llm.js';
+import { toolRegistry } from './tools/tool.registry.js';
+import { getToolCallingSystemPrompt } from './prompts/system.tool-calling.js';
+import { ConversationHistory, type Message } from './llm/history.llm.js';
+import logger from './utils/logger.js';
+import { z } from 'zod';
 
 interface ToolCall {
   name: string;
@@ -26,20 +26,19 @@ interface ParsedResponse {
 }
 
 function App() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [conversationHistory, setConversationHistory] =
-    useState<ConversationHistory | null>(null);
-  const [input, setInput] = useState("");
+  const [conversationHistory, setConversationHistory] = useState<ConversationHistory | null>(null);
+  const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [env, setEnv] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [toolResults, setToolResults] = useState<string[]>([]);
+  const [historyVersion, setHistoryVersion] = useState(0);
   const { exit } = useApp();
 
   useInput((inputKey, key) => {
     if (isLoading) return;
 
-    if (key.escape || (key.ctrl && inputKey === "c")) {
+    if (key.escape || (key.ctrl && inputKey === 'c')) {
       exit();
       return;
     }
@@ -49,39 +48,36 @@ function App() {
         handleSubmit();
       }
     } else if (key.backspace || key.delete) {
-      setInput((prev) => prev.slice(0, -1));
+      setInput(prev => prev.slice(0, -1));
     } else if (inputKey && inputKey.length > 0) {
       // Handle paste operations (multiple characters at once)
-      setInput((prev) => prev + inputKey);
+      setInput(prev => prev + inputKey);
     }
   });
 
   useEffect(() => {
     try {
-      logger.info("Loading environment variables...");
+      logger.info('Loading environment variables...');
       const validatedEnv = validateEnv();
       setEnv(validatedEnv);
 
       // Initialize conversation history with system prompt
-      const history = new ConversationHistory(getToolCallingSystemPrompt(process.cwd(), process.platform));
+      const history = new ConversationHistory(
+        getToolCallingSystemPrompt(process.cwd(), process.platform)
+      );
       setConversationHistory(history);
 
-      logger.info("Environment loaded successfully");
+      logger.info('Environment loaded successfully');
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Unknown error occurred";
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       logger.error(`Environment loading failed: ${errorMessage}`);
       setError(errorMessage);
     }
   }, []);
 
   const parseToolCall = (content: string): ParsedResponse | null => {
-    const thinkingMatch = content.match(
-      /### THINKING\s*\n([\s\S]*?)(?=\n### (ACTION|RESPONSE)|$)/
-    );
-    const actionMatch = content.match(
-      /### ACTION\s*\n([\s\S]*?)(?=\n### RESPONSE|$)/
-    );
+    const thinkingMatch = content.match(/### THINKING\s*\n([\s\S]*?)(?=\n### (ACTION|RESPONSE)|$)/);
+    const actionMatch = content.match(/### ACTION\s*\n([\s\S]*?)(?=\n### RESPONSE|$)/);
     const responseMatch = content.match(/### RESPONSE\s*\n([\s\S]*?)$/);
 
     const result: ParsedResponse = {};
@@ -91,7 +87,7 @@ function App() {
     }
 
     // Try to find XML tool calls in different formats
-    let toolCallText = "";
+    let toolCallText = '';
 
     // First try: XML in ACTION section
     if (actionMatch) {
@@ -132,23 +128,24 @@ function App() {
         // Find the tool opening tag and closing tag to isolate the current tool
         const toolStart = toolCallText.indexOf(`<${toolName}>`);
         const toolEnd = toolCallText.indexOf(`</${toolName}>`);
-        
+
         if (toolStart !== -1 && toolEnd !== -1) {
-          const toolContent = toolCallText.substring(toolStart, toolEnd + `</${toolName}>`.length);
-          
+          const toolContent = toolCallText.substring(toolStart + `<${toolName}>`.length, toolEnd);
+
           // Extract parameter values only from this tool's content
-          const paramMatches = toolContent.matchAll(/<(\w+)>([^<]*)<\/\1>/g);
+          // Improved regex to handle multi-line parameter values
+          const paramMatches = toolContent.matchAll(/<(\w+)>([\s\S]*?)<\/\1>/g);
           for (const match of paramMatches) {
             const paramName = match[1];
-            const paramValue = match[2];
+            const paramValue = match[2].trim();
             parameters[paramName] = paramValue;
           }
         } else {
           // Fallback: extract all parameters (original behavior)
-          const paramMatches = toolCallText.matchAll(/<(\w+)>([^<]*)<\/\1>/g);
+          const paramMatches = toolCallText.matchAll(/<(\w+)>([\s\S]*?)<\/\1>/g);
           for (const match of paramMatches) {
             const paramName = match[1];
-            const paramValue = match[2];
+            const paramValue = match[2].trim();
             parameters[paramName] = paramValue;
           }
         }
@@ -171,9 +168,12 @@ function App() {
     return Object.keys(result).length > 0 ? result : null;
   };
 
-  const convertParametersToTypes = (parameters: Record<string, string>, schema: any): Record<string, any> => {
+  const convertParametersToTypes = (
+    parameters: Record<string, string>,
+    schema: any
+  ): Record<string, any> => {
     const result: Record<string, any> = {};
-    
+
     for (const [key, value] of Object.entries(parameters)) {
       if (schema instanceof z.ZodObject) {
         const fieldSchema = schema.shape[key];
@@ -183,12 +183,12 @@ function App() {
           while (actualSchema._def && actualSchema._def.typeName === 'ZodDefault') {
             actualSchema = actualSchema._def.innerType;
           }
-          
+
           // Get the inner type for optional fields
           if (actualSchema._def && actualSchema._def.typeName === 'ZodOptional') {
             actualSchema = actualSchema._def.innerType;
           }
-          
+
           // Convert based on actual Zod schema type
           if (actualSchema._def && actualSchema._def.typeName === 'ZodNumber') {
             result[key] = Number(value);
@@ -209,7 +209,7 @@ function App() {
         result[key] = value;
       }
     }
-    
+
     return result;
   };
 
@@ -223,11 +223,9 @@ function App() {
     try {
       // Convert string parameters to appropriate types based on tool schema
       const typedParameters = convertParametersToTypes(toolCall.parameters, tool.parameters);
-      
+
       logger.debug(
-        `Executing tool: ${toolCall.name} with parameters: ${JSON.stringify(
-          typedParameters
-        )}`
+        `Executing tool: ${toolCall.name} with parameters: ${JSON.stringify(typedParameters)}`
       );
       // The tool now handles its own parameter validation internally
       const result = await tool.execute(typedParameters as any);
@@ -238,8 +236,7 @@ function App() {
       );
       return JSON.stringify(result, null, 2);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`Tool execution failed: ${toolCall.name} - ${errorMessage}`);
       return `Error executing tool '${toolCall.name}': ${errorMessage}`;
     }
@@ -248,9 +245,9 @@ function App() {
   const handleRecursiveToolCalling = async (
     provider: LLMProvider,
     initialMessages: LLMMessage[],
-    maxIterations: number = 10
+    maxIterations: number = 100
   ): Promise<string> => {
-    let currentMessages = [...initialMessages];
+    const currentMessages = [...initialMessages];
     let iteration = 0;
 
     while (iteration < maxIterations) {
@@ -261,42 +258,39 @@ function App() {
         model: env.OPENAI_MODEL,
         messages: currentMessages,
         stream: true,
-        max_tokens: 92000,
+        max_tokens: 8192,
         temperature: 0,
       };
 
-      let assistantResponse = "";
-      let buffer = "";
+      let assistantResponse = '';
+      let buffer = '';
 
-      await invokeLLMWithStream(provider, request, async (chunk) => {
+      // Start token appending transaction
+      if (conversationHistory) {
+        conversationHistory.startAppendToken();
+      }
+
+      await invokeLLMWithStream(provider, request, async chunk => {
         try {
           buffer += chunk;
-          const lines = buffer.split("\n");
-          
+          const lines = buffer.split('\n');
+
           // Keep the last incomplete line in buffer
-          buffer = lines.pop() || "";
-          
+          buffer = lines.pop() || '';
+
           for (const line of lines) {
-            if (line.startsWith("data: ") && line !== "data: [DONE]") {
+            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
               const data = JSON.parse(line.slice(6));
               const content = data.choices?.[0]?.delta?.content;
               if (content) {
                 assistantResponse += content;
-                setMessages((prev) => {
-                  const newMessages = [...prev];
-                  if (
-                    newMessages[newMessages.length - 1]?.role === "assistant"
-                  ) {
-                    newMessages[newMessages.length - 1].content =
-                      assistantResponse;
-                  } else {
-                    newMessages.push({
-                      role: "assistant",
-                      content: assistantResponse,
-                    });
-                  }
-                  return newMessages;
-                });
+
+                // Append token to conversation history
+                if (conversationHistory) {
+                  conversationHistory.appendToken(content);
+                  // Trigger UI update for real-time rendering
+                  updateHistoryVersion();
+                }
               }
             }
           }
@@ -308,10 +302,14 @@ function App() {
       logger.info(`LLM response received in iteration ${iteration}`);
       logger.debug(`Assistant response: ${assistantResponse}`);
 
-      // Add assistant response to conversation history
-      if (assistantResponse && conversationHistory) {
-        conversationHistory.addMessage("assistant", assistantResponse);
-        currentMessages.push({ role: "assistant", content: assistantResponse });
+      // Commit token appending transaction
+      if (conversationHistory) {
+        conversationHistory.commitAppendToken();
+      }
+
+      // Add assistant response to current messages for next iteration
+      if (assistantResponse) {
+        currentMessages.push({ role: 'assistant', content: assistantResponse });
       }
 
       // Check if we need to execute a tool
@@ -326,21 +324,19 @@ function App() {
 
         // Execute the tool
         const toolResult = await executeTool(parsedResponse.action);
-        setToolResults((prev) => [...prev, toolResult]);
+        setToolResults(prev => [...prev, toolResult]);
 
         logger.info(`Tool execution completed: ${parsedResponse.action.name}`);
         logger.info(
-          `Tool result: ${toolResult.substring(0, 500)}${
-            toolResult.length > 500 ? "..." : ""
-          }`
+          `Tool result: ${toolResult.substring(0, 500)}${toolResult.length > 500 ? '...' : ''}`
         );
 
-        // Add tool result to conversation for next iteration
+        // Add tool result to conversation for next iteration (use user role for compatibility)
         const toolResultMessage = `Tool execution result:\n\`\`\`json\n${toolResult}\n\`\`\``;
         if (conversationHistory) {
-          conversationHistory.addMessage("user", toolResultMessage);
+          conversationHistory.addMessage('user', toolResultMessage);
         }
-        currentMessages.push({ role: "user", content: toolResultMessage });
+        currentMessages.push({ role: 'user', content: toolResultMessage });
 
         logger.info(`Continuing to next iteration for additional tool calls`);
       } else {
@@ -351,28 +347,26 @@ function App() {
     }
 
     logger.warn(`Reached maximum iteration limit of ${maxIterations}`);
-    return "Maximum iteration limit reached. Please try a more specific query.";
+    return 'Maximum iteration limit reached. Please try a more specific query.';
+  };
+
+  const updateHistoryVersion = () => {
+    setHistoryVersion(prev => prev + 1);
   };
 
   const handleSubmit = async () => {
     if (!input.trim() || isLoading || !env) return;
 
-    logger.info(
-      `User input received: ${input.substring(0, 50)}${
-        input.length > 50 ? "..." : ""
-      }`
-    );
+    logger.info(`User input received: ${input.substring(0, 50)}${input.length > 50 ? '...' : ''}`);
 
     if (!conversationHistory) {
-      logger.error("Conversation history not initialized");
+      logger.error('Conversation history not initialized');
       return;
     }
 
-    const userMessage: Message = { role: "user", content: input };
-    setMessages((prev) => [...prev, userMessage]);
-    conversationHistory.addMessage("user", input);
-    const userInput = input;
-    setInput("");
+    conversationHistory.addMessage('user', input);
+    updateHistoryVersion();
+    setInput('');
     setIsLoading(true);
 
     try {
@@ -382,17 +376,14 @@ function App() {
       };
 
       // Start recursive tool calling process
-      await handleRecursiveToolCalling(
-        provider,
-        conversationHistory.getHistoryForLLM()
-      );
+      await handleRecursiveToolCalling(provider, conversationHistory.getHistoryForLLM());
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to get response from AI";
+      const errorMessage = err instanceof Error ? err.message : 'Failed to get response from AI';
+      logger.error(`API Error: ${errorMessage}`);
       setError(errorMessage);
     } finally {
       setIsLoading(false);
-      logger.info("Request processing completed");
+      logger.info('Request processing completed');
     }
   };
 
@@ -416,29 +407,36 @@ function App() {
   return (
     <Box flexDirection="column" padding={1}>
       <Box flexDirection="column" marginBottom={1}>
-        {messages.length === 0 && (
+        {(!conversationHistory || conversationHistory.getHistory().length === 0) && (
           <Box marginBottom={1}>
             <Text color="yellow">Welcome to Agentic Tool Calling CLI!</Text>
             <Text> I have access to tools like grep for code search.</Text>
             <Text> Type your message and press Enter to start.</Text>
           </Box>
         )}
-        {messages
-          .filter((message) => message.content.trim().length > 0)
-          .map((message, index) => (
-            <Box key={index} marginBottom={1} flexDirection="row">
-              <Text color="cyan">{">"}</Text>
-              <Text color="cyan"> </Text>
-              <Text color={message.role === "assistant" ? "cyan" : "white"}>
-                {message.content}
-              </Text>
-            </Box>
-          ))}
+        {conversationHistory &&
+          conversationHistory
+            .getHistory()
+            .filter(
+              message =>
+                message.content.trim().length > 0 &&
+                message.role !== 'system' &&
+                !message.content.includes('Tool execution result:')
+            )
+            .map((message, index) => (
+              <Box key={index} marginBottom={1} flexDirection="row">
+                <Text color="cyan">{'>'}</Text>
+                <Text color="cyan"> </Text>
+                <Text color={message.role === 'assistant' ? 'cyan' : 'white'}>
+                  {message.content}
+                </Text>
+              </Box>
+            ))}
       </Box>
 
       {!isLoading && (
         <Box>
-          <Text color="cyan">{"> "}</Text>
+          <Text color="cyan">{'> '}</Text>
           <Text>{input}</Text>
         </Box>
       )}
