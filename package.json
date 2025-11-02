@@ -25,6 +25,7 @@
     "ink": "^6.4.0",
     "ink-big-text": "^2.0.0",
     "ink-gradient": "^3.0.0",
+    "ink-select-input": "^6.2.0",
     "ink-text-input": "^6.0.0",
     "react": "^19.2.0",
     "winston": "^3.18.3",

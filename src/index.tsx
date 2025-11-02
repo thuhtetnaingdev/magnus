@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { render, Text, Box, useInput, useApp } from 'ink';
 import TextInput from 'ink-text-input';
+import SelectInput from 'ink-select-input';
 import Gradient from 'ink-gradient';
 import BigText from 'ink-big-text';
 import { MarkdownViewer } from './markdown-viewer.js';
@@ -37,6 +38,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [toolResults, setToolResults] = useState<string[]>([]);
   const [historyVersion, setHistoryVersion] = useState(0);
+  const [showModal, setShowModal] = useState(false);
   const { exit } = useApp();
 
   useInput((inputKey, key) => {
@@ -45,6 +47,10 @@ function App() {
     if (key.escape || (key.ctrl && inputKey === 'c')) {
       exit();
       return;
+    }
+
+    if (key.ctrl && inputKey.toLowerCase() === 'p') {
+      setShowModal(true);
     }
   });
 
@@ -344,11 +350,22 @@ function App() {
     setHistoryVersion(prev => prev + 1);
   };
 
+  const handleModalSelect = (item: { label: string; value: string }) => {
+    if (item.value === 'clear') {
+      conversationHistory?.clear();
+      setToolResults([]);
+      updateHistoryVersion();
+    }
+    setShowModal(false);
+  };
+
   const handleSubmit = async () => {
     const currentInput = input.trim();
     if (!currentInput || isLoading || !env) return;
 
-    logger.info(`User input received: ${currentInput.substring(0, 50)}${currentInput.length > 50 ? '...' : ''}`);
+    logger.info(
+      `User input received: ${currentInput.substring(0, 50)}${currentInput.length > 50 ? '...' : ''}`
+    );
 
     if (!conversationHistory) {
       logger.error('Conversation history not initialized');
@@ -395,55 +412,84 @@ function App() {
     );
   }
 
+  const modal = (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor="cyan"
+      padding={1}
+      width={30}
+      alignItems="center"
+      justifyContent="center"
+    >
+      <Text color="cyanBright">⚙ Menu</Text>
+      <SelectInput
+        items={[{ label: 'Clear session', value: 'clear' }]}
+        onSelect={handleModalSelect}
+      />
+      <Text color="gray">Press Esc to close</Text>
+    </Box>
+  );
+
   return (
     <Box flexDirection="column" padding={1}>
-      <Box flexDirection="column" marginBottom={1}>
-        {(!conversationHistory || conversationHistory.getHistory().length === 0) && (
-          <Box marginBottom={1} flexDirection="column">
-            <Gradient name="pastel">
-              <BigText text="Agentic CLI" />
-            </Gradient>
-            <Text color="gray">Your AI assistant with tool access.</Text>
-            <Text color="dim">Type your message and press Enter to begin.</Text>
+      {showModal ? (
+        modal
+      ) : (
+        <>
+          <Box flexDirection="column" marginBottom={1}>
+            <Box marginBottom={1} flexDirection="column">
+              <Gradient name="pastel">
+                <BigText text="Magnus CLI" />
+              </Gradient>
+              <Text color="gray">Your AI assistant with tool access.</Text>
+              <Text color="dim">Type your message and press Enter to begin.</Text>
+            </Box>
+            {conversationHistory &&
+              conversationHistory
+                .getHistory()
+                .filter(
+                  message =>
+                    message.content.trim().length > 0 &&
+                    message.role !== 'system' &&
+                    !message.content.includes('Tool execution result:')
+                )
+                .map((message, index) => (
+                  <Box key={index} flexDirection="column" marginY={1}>
+                    <Box flexDirection="row">
+                      <Text color={message.role === 'assistant' ? 'magentaBright' : 'greenBright'}>
+                        {message.role === 'assistant' ? 'Assistant ▸' : 'You ▸'}
+                      </Text>
+                    </Box>
+                    <Box
+                      marginLeft={2}
+                      borderStyle="round"
+                      borderColor={message.role === 'assistant' ? 'gray' : 'green'}
+                    >
+                      {message.role === 'assistant' ? (
+                        <MarkdownViewer content={message.content} />
+                      ) : (
+                        <Text>{message.content}</Text>
+                      )}
+                    </Box>
+                  </Box>
+                ))}
           </Box>
-        )}
-        {conversationHistory &&
-          conversationHistory
-            .getHistory()
-            .filter(
-              message =>
-                message.content.trim().length > 0 &&
-                message.role !== 'system' &&
-                !message.content.includes('Tool execution result:')
-            )
-            .map((message, index) => (
-              <Box key={index} flexDirection="column" marginY={1}>
-                <Box flexDirection="row">
-                  <Text color={message.role === 'assistant' ? 'magentaBright' : 'greenBright'}>
-                    {message.role === 'assistant' ? 'Assistant ▸' : 'You ▸'}
-                  </Text>
-                </Box>
-                <Box marginLeft={2} borderStyle="round" borderColor={message.role === 'assistant' ? 'gray' : 'green'}>
-                  {message.role === 'assistant'
-                    ? <MarkdownViewer content={message.content} />
-                    : <Text>{message.content}</Text>}
-                </Box>
-              </Box>
-            ))}
-      </Box>
 
-      {!isLoading && (
-        <Box>
-          <Text color="greenBright">❯ </Text>
-          <TextInput
-            value={input}
-            onChange={setInput}
-            onSubmit={handleSubmit}
-            placeholder="Type your message..."
-            focus={true}
-            showCursor={true}
-          />
-        </Box>
+          {!isLoading && (
+            <Box>
+              <Text color="greenBright">❯ </Text>
+              <TextInput
+                value={input}
+                onChange={setInput}
+                onSubmit={handleSubmit}
+                placeholder="Type your message..."
+                focus={true}
+                showCursor={true}
+              />
+            </Box>
+          )}
+        </>
       )}
     </Box>
   );
