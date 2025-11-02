@@ -360,11 +360,55 @@ function App() {
     setHistoryVersion(prev => prev + 1);
   };
 
+  const handleInitializeProject = async () => {
+    if (!conversationHistory) return;
+
+    setShowModal(false);
+    setIsLoading(true);
+
+    try {
+      // Add a system message to guide the initialization process
+      const initializationPrompt = `Please initialize this project by:
+1. Using the tree tool to get the project structure
+2. Using the read tool to examine key files like package.json, README.md, etc.
+3. Using the glob tool to find relevant files
+4. Creating a comprehensive MAGNUS.md file that documents:
+   - Project overview and purpose
+   - Directory structure
+   - Key files and their purposes
+   - Available tools and their usage
+   - How to run and build the project
+
+The MAGNUS.md should be in root directory and formatted in markdown. Focus on clarity and usefulness for new developers. ./MAGNUS.md`;
+
+      // Add the initialization request to conversation history
+      conversationHistory.addMessage('user', initializationPrompt);
+      updateHistoryVersion();
+
+      const provider: LLMProvider = {
+        apiUrl: `${env.OPENAI_API_BASE}/chat/completions`,
+        apiKey: env.OPENAI_API_KEY,
+      };
+
+      // Start recursive tool calling process to initialize the project
+      await handleRecursiveToolCalling(provider, conversationHistory.getHistoryForLLM());
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to initialize project';
+      logger.error(`Project initialization error: ${errorMessage}`);
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleModalSelect = (item: { label: string; value: string }) => {
     if (item.value === 'clear') {
       conversationHistory?.clear();
       setToolResults([]);
       updateHistoryVersion();
+    } else if (item.value === 'initialize') {
+      handleInitializeProject();
+      return; // Don't close modal immediately - handleInitializeProject does it
     }
     setShowModal(false);
   };
@@ -434,7 +478,10 @@ function App() {
     >
       <Text color="cyanBright">⚙ Menu</Text>
       <SelectInput
-        items={[{ label: 'Clear session', value: 'clear' }]}
+        items={[
+          { label: 'Initialize project', value: 'initialize' },
+          { label: 'Clear session', value: 'clear' },
+        ]}
         onSelect={handleModalSelect}
       />
       <Text color="gray">Press Esc to close</Text>
@@ -486,6 +533,11 @@ function App() {
                 ))}
           </Box>
 
+          {isLoading && (
+            <Box>
+              <Text color="yellow">Initializing project and creating MAGNUS.md...</Text>
+            </Box>
+          )}
           {!isLoading && (
             <Box flexDirection="column">
               <Box>
