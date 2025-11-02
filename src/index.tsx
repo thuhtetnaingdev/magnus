@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { useState, useEffect } from 'react';
 import { render, Text, Box, useInput, useApp } from 'ink';
+import TextInput from 'ink-text-input';
+import Gradient from 'ink-gradient';
+import BigText from 'ink-big-text';
+import { MarkdownViewer } from './markdown-viewer.js';
 import { validateEnv } from './env.js';
 import {
   invokeLLMWithStream,
@@ -42,22 +46,10 @@ function App() {
       exit();
       return;
     }
-
-    if (key.return) {
-      if (input.trim()) {
-        handleSubmit();
-      }
-    } else if (key.backspace || key.delete) {
-      setInput(prev => prev.slice(0, -1));
-    } else if (inputKey && inputKey.length > 0) {
-      // Handle paste operations (multiple characters at once)
-      setInput(prev => prev + inputKey);
-    }
   });
 
   useEffect(() => {
     try {
-      logger.info('Loading environment variables...');
       const validatedEnv = validateEnv();
       setEnv(validatedEnv);
 
@@ -66,8 +58,6 @@ function App() {
         getToolCallingSystemPrompt(process.cwd(), process.platform)
       );
       setConversationHistory(history);
-
-      logger.info('Environment loaded successfully');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       logger.error(`Environment loading failed: ${errorMessage}`);
@@ -355,16 +345,17 @@ function App() {
   };
 
   const handleSubmit = async () => {
-    if (!input.trim() || isLoading || !env) return;
+    const currentInput = input.trim();
+    if (!currentInput || isLoading || !env) return;
 
-    logger.info(`User input received: ${input.substring(0, 50)}${input.length > 50 ? '...' : ''}`);
+    logger.info(`User input received: ${currentInput.substring(0, 50)}${currentInput.length > 50 ? '...' : ''}`);
 
     if (!conversationHistory) {
       logger.error('Conversation history not initialized');
       return;
     }
 
-    conversationHistory.addMessage('user', input);
+    conversationHistory.addMessage('user', currentInput);
     updateHistoryVersion();
     setInput('');
     setIsLoading(true);
@@ -408,10 +399,12 @@ function App() {
     <Box flexDirection="column" padding={1}>
       <Box flexDirection="column" marginBottom={1}>
         {(!conversationHistory || conversationHistory.getHistory().length === 0) && (
-          <Box marginBottom={1}>
-            <Text color="yellow">Welcome to Agentic Tool Calling CLI!</Text>
-            <Text> I have access to tools like grep for code search.</Text>
-            <Text> Type your message and press Enter to start.</Text>
+          <Box marginBottom={1} flexDirection="column">
+            <Gradient name="pastel">
+              <BigText text="Agentic CLI" />
+            </Gradient>
+            <Text color="gray">Your AI assistant with tool access.</Text>
+            <Text color="dim">Type your message and press Enter to begin.</Text>
           </Box>
         )}
         {conversationHistory &&
@@ -424,20 +417,32 @@ function App() {
                 !message.content.includes('Tool execution result:')
             )
             .map((message, index) => (
-              <Box key={index} marginBottom={1} flexDirection="row">
-                <Text color="cyan">{'>'}</Text>
-                <Text color="cyan"> </Text>
-                <Text color={message.role === 'assistant' ? 'cyan' : 'white'}>
-                  {message.content}
-                </Text>
+              <Box key={index} flexDirection="column" marginY={1}>
+                <Box flexDirection="row">
+                  <Text color={message.role === 'assistant' ? 'magentaBright' : 'greenBright'}>
+                    {message.role === 'assistant' ? 'Assistant ▸' : 'You ▸'}
+                  </Text>
+                </Box>
+                <Box marginLeft={2} borderStyle="round" borderColor={message.role === 'assistant' ? 'gray' : 'green'}>
+                  {message.role === 'assistant'
+                    ? <MarkdownViewer content={message.content} />
+                    : <Text>{message.content}</Text>}
+                </Box>
               </Box>
             ))}
       </Box>
 
       {!isLoading && (
         <Box>
-          <Text color="cyan">{'> '}</Text>
-          <Text>{input}</Text>
+          <Text color="greenBright">❯ </Text>
+          <TextInput
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSubmit}
+            placeholder="Type your message..."
+            focus={true}
+            showCursor={true}
+          />
         </Box>
       )}
     </Box>

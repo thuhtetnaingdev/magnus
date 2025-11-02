@@ -26,13 +26,18 @@
   "dependencies": {
     "dotenv": "^16.6.1",
     "ink": "^6.4.0",
+    "ink-big-text": "^2.0.0",
+    "ink-gradient": "^3.0.0",
+    "ink-text-input": "^6.0.0",
     "react": "^19.2.0",
     "winston": "^3.18.3",
     "zod": "^3.22.0"
   },
   "devDependencies": {
+    "@types/marked": "^5.0.2",
     "@types/node": "^20.0.0",
     "@types/react": "^19.2.2",
+    "marked": "^16.4.1",
     "prettier": "^3.6.2",
     "ts-node": "^10.9.0",
     "typescript": "^5.0.0"
