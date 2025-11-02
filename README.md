@@ -72,30 +72,20 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 ## Usage
 
-### Basic Usage
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-Run the interactive CLI:
+2. Install the package globally:
+   ```bash
+   npm i -g .
+   ```
 
-```bash
-npm start
-```
-
-### Development Mode
-
-Run with hot reload for development:
-
-```bash
-npm run dev
-```
-
-### Build and Run
-
-Build the project and run the compiled version:
-
-```bash
-npm run build
-npm run start:prod
-```
+3. Run the application:
+   ```bash
+   magnus
+   ```
 
 ## Project Structure
 
