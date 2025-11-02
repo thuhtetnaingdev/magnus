@@ -44,12 +44,22 @@ function App() {
   useInput((inputKey, key) => {
     if (isLoading) return;
 
-    if (key.escape || (key.ctrl && inputKey === 'c')) {
+    // Always allow Ctrl+C to exit
+    if (key.ctrl && inputKey === 'c') {
       exit();
       return;
     }
 
-    if (key.ctrl && inputKey.toLowerCase() === 'p') {
+    // Handle Escape key - only close modals, never exit application
+    if (key.escape) {
+      if (showModal) {
+        setShowModal(false);
+      }
+      return;
+    }
+
+    // Open modal with Ctrl+P (only when modal is not open)
+    if (!showModal && key.ctrl && inputKey.toLowerCase() === 'p') {
       setShowModal(true);
     }
   });
@@ -439,8 +449,8 @@ function App() {
         <>
           <Box flexDirection="column" marginBottom={1}>
             <Box marginBottom={1} flexDirection="column">
-              <Gradient name="pastel">
-                <BigText text="Magnus CLI" />
+              <Gradient name="vice">
+                <BigText text="Magnus" />
               </Gradient>
               <Text color="gray">Your AI assistant with tool access.</Text>
               <Text color="dim">Type your message and press Enter to begin.</Text>
@@ -477,16 +487,21 @@ function App() {
           </Box>
 
           {!isLoading && (
-            <Box>
-              <Text color="greenBright">❯ </Text>
-              <TextInput
-                value={input}
-                onChange={setInput}
-                onSubmit={handleSubmit}
-                placeholder="Type your message..."
-                focus={true}
-                showCursor={true}
-              />
+            <Box flexDirection="column">
+              <Box>
+                <Text color="greenBright">❯ </Text>
+                <TextInput
+                  value={input}
+                  onChange={setInput}
+                  onSubmit={handleSubmit}
+                  placeholder="Type your message..."
+                  focus={true}
+                  showCursor={true}
+                />
+              </Box>
+              <Box marginTop={1}>
+                <Text color="dim">💡 Press Ctrl+P for options</Text>
+              </Box>
             </Box>
           )}
         </>
