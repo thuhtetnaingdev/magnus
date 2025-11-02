@@ -39,6 +39,7 @@ function App() {
   const [toolResults, setToolResults] = useState<string[]>([]);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [showModal, setShowModal] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
   const { exit } = useApp();
 
   useInput((inputKey, key) => {
@@ -365,6 +366,7 @@ function App() {
 
     setShowModal(false);
     setIsLoading(true);
+    setIsInitializing(true);
 
     try {
       // Add a system message to guide the initialization process
@@ -398,6 +400,7 @@ The MAGNUS.md should be in root directory and formatted in markdown. Focus on cl
       setError(errorMessage);
     } finally {
       setIsLoading(false);
+      setIsInitializing(false);
     }
   };
 
@@ -533,9 +536,14 @@ The MAGNUS.md should be in root directory and formatted in markdown. Focus on cl
                 ))}
           </Box>
 
-          {isLoading && (
+          {isInitializing && (
             <Box>
               <Text color="yellow">Initializing project and creating MAGNUS.md...</Text>
+            </Box>
+          )}
+          {isLoading && !isInitializing && (
+            <Box>
+              <Text color="yellow">Processing...</Text>
             </Box>
           )}
           {!isLoading && (

@@ -1,5 +1,7 @@
 import { toolRegistry } from '../tools/tool.registry.js';
 import { getParameterDescriptions } from '../tools/tool.base.js';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 
 export function getToolCallingSystemPrompt(currentDir: string, os: string): string {
   const tools = toolRegistry.getAllTools();
@@ -17,7 +19,19 @@ ${Object.entries(getParameterDescriptions(tool.parameters))
     )
     .join('\n');
 
-  return `You are a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices. You have access to powerful tools that help you provide accurate, well-informed responses.
+  // Check for MAGNUS.md file and include its content if it exists
+  let magnusRules = '';
+  const magnusPath = join(currentDir, 'MAGNUS.md');
+  if (existsSync(magnusPath)) {
+    try {
+      const magnusContent = readFileSync(magnusPath, 'utf-8');
+      magnusRules = `\n\n## PROJECT-SPECIFIC RULES (from MAGNUS.md)\n${magnusContent}\n`;
+    } catch (error) {
+      console.warn('Failed to read MAGNUS.md file:', error);
+    }
+  }
+
+  return `You are a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices. You have access to powerful tools that help you provide accurate, well-informed responses.${magnusRules}
 
 ## CONTEXT INFORMATION
 - Current Directory: "${currentDir}"
