@@ -87,6 +87,7 @@ src/
 
 Agents must follow this exact format:
 
+#### Sequential Tool Calling
 ```
 ### THINKING
 [Reasoning process]
@@ -101,17 +102,59 @@ Agents must follow this exact format:
 [Final answer]
 ```
 
+#### Parallel Tool Calling
+```
+### THINKING
+[Reasoning process - explain why parallel execution is appropriate]
+
+### ACTION
+<tool_name1>
+<parameter1>value1</parameter1>
+<parameter2>value2</parameter2>
+</tool_name1>
+<tool_name2>
+<parameter1>value1</parameter1>
+<parameter2>value2</parameter2>
+</tool_name2>
+
+### RESPONSE
+[Final answer]
+```
+
 **Critical Requirements**:
 
 - Section headers must be exactly `### THINKING`, `### ACTION`, `### RESPONSE`
-- ACTION section contains ONLY XML tool call
+- ACTION section contains ONLY XML tool call(s)
 - Each parameter on separate lines
 - One blank line between sections
+- For parallel calls: tools must be independent (no dependencies)
+
+### Parallel Tool Calling Strategy
+
+#### When to Use Parallel Tool Calling
+- **Independent Operations**: Tools that don't depend on each other's results
+- **Exploration Tasks**: Multiple searches or file operations that can run concurrently
+- **Performance Optimization**: When waiting for sequential execution would be inefficient
+- **Comprehensive Analysis**: Gathering multiple perspectives on a project simultaneously
+
+#### When to Use Sequential Tool Calling
+- **Dependent Operations**: When one tool's output is needed for another tool
+- **Complex Workflows**: Multi-step processes that require verification at each step
+- **Code Modification**: When using aider tool for code changes (should be sequential)
+- **Error Recovery**: When previous tool execution failed and needs correction
+
+#### Best Practices for Parallel Tool Calling
+1. **Analyze Dependencies**: Ensure tools are truly independent before using parallel execution
+2. **Limit Scope**: Don't overload with too many parallel tools (2-3 is usually optimal)
+3. **Monitor Performance**: Be aware that some tools (like aider) may be resource-intensive
+4. **Plan for Errors**: Handle cases where some tools succeed while others fail
+5. **Use Thoughtfully**: Parallel execution is powerful but should be used strategically
 
 ### Recursive Tool Calling Workflow
 
-The system now supports recursive tool calling, allowing the LLM to make multiple tool calls in sequence:
+The system now supports both sequential and parallel tool calling, allowing the LLM to make multiple tool calls either sequentially or concurrently:
 
+#### Sequential Tool Calling
 1. **Initial Request**: User sends query
 2. **LLM Response**: LLM analyzes and may include tool call in ACTION section
 3. **Tool Execution**: System executes the tool and gets result
@@ -119,11 +162,21 @@ The system now supports recursive tool calling, allowing the LLM to make multipl
 5. **Iteration**: Process repeats (max 10 iterations) until no more tool calls
 6. **Final Response**: LLM provides final answer in RESPONSE section
 
+#### Parallel Tool Calling
+1. **Initial Request**: User sends query
+2. **LLM Response**: LLM analyzes and includes multiple independent tool calls in ACTION section
+3. **Parallel Execution**: System executes all tools concurrently using Promise.all
+4. **Results Aggregation**: All tool results are collected and combined
+5. **Next Iteration**: Combined results are added to conversation and LLM is called again
+6. **Final Response**: LLM provides final answer in RESPONSE section
+
 This enables complex multi-step workflows like:
 
-- Search for files → Read specific file → Analyze content
-- Find patterns → Get more context → Provide comprehensive answer
-- Multiple searches with refined parameters based on previous results
+- **Sequential**: Search for files → Read specific file → Analyze content
+- **Sequential**: Find patterns → Get more context → Provide comprehensive answer
+- **Parallel**: Search for files AND get project structure simultaneously
+- **Parallel**: Read package.json AND examine directory structure concurrently
+- **Mixed**: Parallel exploration followed by sequential analysis
 
 ## Development Workflow
 
@@ -193,6 +246,64 @@ export const myTool = createTool({
 
 ### Tool Usage Examples
 
+#### Sequential Tool Examples
+
+```xml
+<!-- Read entire file -->
+<read>
+<path>src/index.tsx</path>
+</read>
+
+<!-- Search for functions -->
+<grep>
+<pattern>function\s+\w+</pattern>
+<include>*.ts</include>
+</grep>
+
+<!-- Find all TypeScript files -->
+<glob>
+<pattern>**/*.ts</pattern>
+</glob>
+```
+
+#### Parallel Tool Examples
+
+```xml
+<!-- Multiple independent searches -->
+<glob>
+<pattern>**/*.ts</pattern>
+<path>src</path>
+</glob>
+<tree>
+<path>.</path>
+<maxDepth>2</maxDepth>
+</tree>
+
+<!-- Comprehensive project analysis -->
+<read>
+<path>/Users/username/project/package.json</path>
+</read>
+<glob>
+<pattern>**/*.ts</pattern>
+<path>.</path>
+</glob>
+<tree>
+<path>.</path>
+<maxDepth>3</maxDepth>
+</tree>
+
+<!-- Mixed exploration -->
+<grep>
+<pattern>(auth|login|authenticate)</pattern>
+<path>.</path>
+<include>*.{ts,js,tsx,jsx}</include>
+</grep>
+<glob>
+<pattern>**/*.ts</pattern>
+<path>.</path>
+</glob>
+```
+
 #### Read Tool Examples
 
 ```xml
@@ -244,6 +355,74 @@ export const myTool = createTool({
 <pattern>*.tool.ts</pattern>
 <path>src/tools</path>
 </glob>
+```
+
+#### Aider Tool Examples
+
+```xml
+<!-- Execute aider with instruction and files (diff mode) -->
+<aider>
+<instruction>Create a new function that handles user authentication</instruction>
+<files>/Users/username/project/src/auth.ts</files>
+<editFormat>diff</editFormat>
+</aider>
+
+<!-- Multiple files: Use separate <files> tags for each file -->
+<aider>
+<instruction>Create a new component that follows the pattern from existing components</instruction>
+<files>/Users/username/project/src/components/NewComponent.tsx</files>
+<files>/Users/username/project/src/components/ExistingComponent.tsx</files>
+<editFormat>diff</editFormat>
+</aider>
+
+<!-- Execute aider with specific model -->
+<aider>
+<instruction>Refactor the database connection logic</instruction>
+<files>/Users/username/project/src/db.ts</files>
+<model>gpt-4</model>
+<editFormat>diff</editFormat>
+</aider>
+
+<!-- Execute aider with whole mode (when diff fails multiple times) -->
+<aider>
+<instruction>Update function with complex changes</instruction>
+<files>/Users/username/project/src/complex.ts</files>
+<editFormat>whole</editFormat>
+</aider>
+
+<!-- Enhanced: Reference multiple files for context -->
+<aider>
+<instruction>In auth.ts, implement the login function using the JWT pattern from utils/jwt.ts. The function should validate credentials and return a token.</instruction>
+<files>/Users/username/project/src/auth.ts</files>
+<files>/Users/username/project/src/utils/jwt.ts</files>
+<editFormat>diff</editFormat>
+</aider>
+
+<!-- Enhanced: Modify multiple related files -->
+<aider>
+<instruction>Update the User interface in types.ts to include email field, then update the createUser function in api.ts to handle the new field</instruction>
+<files>/Users/username/project/src/types.ts</files>
+<files>/Users/username/project/src/api.ts</files>
+<editFormat>diff</editFormat>
+</aider>
+
+<!-- Best: Reference specific patterns and line numbers -->
+<aider>
+<instruction>In auth.ts, implement the login function using the JWT pattern from utils/jwt.ts:45-78. Follow the same error handling pattern as validateUser in auth.ts:23-35. The function should validate credentials and return a token with the same structure as generateToken in utils/jwt.ts:12-25.</instruction>
+<files>/Users/username/project/src/auth.ts</files>
+<files>/Users/username/project/src/utils/jwt.ts</files>
+<editFormat>diff</editFormat>
+</aider>
+
+<!-- With comprehensive references -->
+<aider>
+<instruction>Create a new API endpoint in api/users.ts that follows the same pattern as api/products.ts:15-45. Use the same validation pattern from utils/validation.ts:8-22 and error handling from utils/errors.ts:5-18. The endpoint should handle GET requests and return paginated results like api/products.ts:30-40.</instruction>
+<files>/Users/username/project/src/api/users.ts</files>
+<files>/Users/username/project/src/api/products.ts</files>
+<files>/Users/username/project/src/utils/validation.ts</files>
+<files>/Users/username/project/src/utils/errors.ts</files>
+<editFormat>diff</editFormat>
+</aider>
 ```
 
 ### UI/UX

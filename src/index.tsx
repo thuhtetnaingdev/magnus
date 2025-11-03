@@ -26,7 +26,7 @@ interface ToolCall {
 
 interface ParsedResponse {
   thinking?: string;
-  action?: ToolCall;
+  action?: ToolCall | ToolCall[];
   response?: string;
 }
 
@@ -40,21 +40,25 @@ function App() {
   const [historyVersion, setHistoryVersion] = useState(0);
   const [showModal, setShowModal] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
+  const [isInterruptible, setIsInterruptible] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(false);
   const { exit } = useApp();
 
   useInput((inputKey, key) => {
-    if (isLoading) return;
-
     // Always allow Ctrl+C to exit
     if (key.ctrl && inputKey === 'c') {
       exit();
       return;
     }
 
-    // Handle Escape key - only close modals, never exit application
+    // Handle Escape key
     if (key.escape) {
       if (showModal) {
         setShowModal(false);
+      } else if (isLoading && isInterruptible) {
+        // Cancel the current LLM request
+        setIsCancelled(true);
+        logger.info('LLM request cancelled by user');
       }
       return;
     }
@@ -93,78 +97,71 @@ function App() {
       result.thinking = thinkingMatch[1];
     }
 
-    // Try to find XML tool calls in different formats
-    let toolCallText = '';
-
-    // First try: XML in ACTION section
+    // Try to find XML tool calls in ACTION section
     if (actionMatch) {
       const actionContent = actionMatch[1];
-      // Find ALL tool calls and take the last one (most recent)
+      // Find ALL tool calls
       const xmlMatches = [...actionContent.matchAll(/<([\w*]+)>[\s\S]*?<\/\1>/g)];
+      
       if (xmlMatches.length > 0) {
-        // Use the last tool call found (most recent)
-        const lastMatch = xmlMatches[xmlMatches.length - 1];
-        toolCallText = lastMatch[0];
-        logger.debug(`Found action section with XML tool call: ${toolCallText}`);
-      }
-    }
+        const toolCalls: ToolCall[] = [];
+        
+        for (const match of xmlMatches) {
+          const toolCallText = match[0];
+          try {
+            // Extract tool name from opening tag
+            const toolNameMatch = toolCallText.match(/<(\*?[\w]+)>/);
+            if (!toolNameMatch) {
+              logger.warn(`Could not extract tool name from: ${toolCallText}`);
+              continue;
+            }
 
-    // Second try: Direct XML without ACTION section
-    if (!toolCallText) {
-      const directXmlMatch = content.match(/<([\w*]+)>[\s\S]*?<\/\1>/);
-      if (directXmlMatch) {
-        toolCallText = directXmlMatch[0];
-        logger.debug(`Found direct XML tool call: ${toolCallText}`);
-      }
-    }
+            const toolName = toolNameMatch[1];
+            const parameters: any = {};
 
-    // Parse the tool call if found
-    if (toolCallText) {
-      try {
-        // Extract tool name from opening tag
-        const toolNameMatch = toolCallText.match(/<(\*?[\w]+)>/);
-        if (!toolNameMatch) {
-          logger.warn(`Could not extract tool name from: ${toolCallText}`);
-          return result;
-        }
+            // Extract parameters from the current tool call
+            const toolStart = toolCallText.indexOf(`<${toolName}>`);
+            const toolEnd = toolCallText.indexOf(`</${toolName}>`);
 
-        const toolName = toolNameMatch[1];
-        const parameters: any = {};
+            if (toolStart !== -1 && toolEnd !== -1) {
+              const toolContent = toolCallText.substring(toolStart + `<${toolName}>`.length, toolEnd);
 
-        // Extract only parameters from the current tool call
-        // Find the tool opening tag and closing tag to isolate the current tool
-        const toolStart = toolCallText.indexOf(`<${toolName}>`);
-        const toolEnd = toolCallText.indexOf(`</${toolName}>`);
+              // Extract parameter values from this tool's content
+              const paramMatches = toolContent.matchAll(/<(\w+)>([\s\S]*?)<\/\1>/g);
+              for (const paramMatch of paramMatches) {
+                const paramName = paramMatch[1];
+                const paramValue = paramMatch[2].trim();
+                
+                // Handle multiple parameters with same name by collecting into array
+                if (parameters[paramName]) {
+                  if (Array.isArray(parameters[paramName])) {
+                    parameters[paramName].push(paramValue);
+                  } else {
+                    // Convert existing single value to array
+                    parameters[paramName] = [parameters[paramName], paramValue];
+                  }
+                } else {
+                  parameters[paramName] = paramValue;
+                }
+              }
+            }
 
-        if (toolStart !== -1 && toolEnd !== -1) {
-          const toolContent = toolCallText.substring(toolStart + `<${toolName}>`.length, toolEnd);
+            toolCalls.push({
+              name: toolName,
+              parameters: parameters,
+            });
 
-          // Extract parameter values only from this tool's content
-          // Improved regex to handle multi-line parameter values
-          const paramMatches = toolContent.matchAll(/<(\w+)>([\s\S]*?)<\/\1>/g);
-          for (const match of paramMatches) {
-            const paramName = match[1];
-            const paramValue = match[2].trim();
-            parameters[paramName] = paramValue;
-          }
-        } else {
-          // Fallback: extract all parameters (original behavior)
-          const paramMatches = toolCallText.matchAll(/<(\w+)>([\s\S]*?)<\/\1>/g);
-          for (const match of paramMatches) {
-            const paramName = match[1];
-            const paramValue = match[2].trim();
-            parameters[paramName] = paramValue;
+            logger.debug(`Successfully parsed tool call: ${toolName}`);
+          } catch (e) {
+            logger.warn(`Failed to parse XML tool call: ${toolCallText}`);
           }
         }
 
-        result.action = {
-          name: toolName,
-          parameters: parameters,
-        };
-
-        logger.debug(`Successfully parsed tool call: ${toolName}`);
-      } catch (e) {
-        logger.warn(`Failed to parse XML tool call: ${toolCallText}`);
+        if (toolCalls.length === 1) {
+          result.action = toolCalls[0];
+        } else if (toolCalls.length > 1) {
+          result.action = toolCalls;
+        }
       }
     }
 
@@ -176,7 +173,7 @@ function App() {
   };
 
   const convertParametersToTypes = (
-    parameters: Record<string, string>,
+    parameters: Record<string, any>,
     schema: any
   ): Record<string, any> => {
     const result: Record<string, any> = {};
@@ -198,11 +195,14 @@ function App() {
 
           // Convert based on actual Zod schema type
           if (actualSchema._def && actualSchema._def.typeName === 'ZodNumber') {
-            result[key] = Number(value);
+            result[key] = Array.isArray(value) ? value.map(v => Number(v)) : Number(value);
           } else if (actualSchema._def && actualSchema._def.typeName === 'ZodBoolean') {
             // Handle boolean values - convert strings like "true", "false", "1", "0"
-            const lowerValue = value.toLowerCase();
-            result[key] = lowerValue === 'true' || lowerValue === '1';
+            const convertBoolean = (v: any) => {
+              const lowerValue = String(v).toLowerCase();
+              return lowerValue === 'true' || lowerValue === '1';
+            };
+            result[key] = Array.isArray(value) ? value.map(convertBoolean) : convertBoolean(value);
           } else {
             // Keep as string for other types
             result[key] = value;
@@ -220,11 +220,12 @@ function App() {
     return result;
   };
 
-  const executeTool = async (toolCall: ToolCall): Promise<string> => {
+  const executeTool = async (toolCall: ToolCall): Promise<{ success: boolean; result: string; error?: string }> => {
     const tool = toolRegistry.getTool(toolCall.name);
     if (!tool) {
-      logger.error(`Tool not found: ${toolCall.name}`);
-      return `Error: Tool '${toolCall.name}' not found`;
+      const error = `Tool '${toolCall.name}' not found. Available tools: ${toolRegistry.getAllTools().map(t => t.name).join(', ')}`;
+      logger.error(error);
+      return { success: false, result: '', error };
     }
 
     try {
@@ -241,12 +242,33 @@ function App() {
           JSON.stringify(result).length
         } chars`
       );
-      return JSON.stringify(result, null, 2);
+      return { success: true, result: JSON.stringify(result, null, 2) };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`Tool execution failed: ${toolCall.name} - ${errorMessage}`);
-      return `Error executing tool '${toolCall.name}': ${errorMessage}`;
+      return { success: false, result: '', error: errorMessage };
     }
+  };
+
+  const executeToolsParallel = async (toolCalls: ToolCall[]): Promise<{ success: boolean; results: { [key: string]: string }; errors: { [key: string]: string } }> => {
+    const results: { [key: string]: string } = {};
+    const errors: { [key: string]: string } = {};
+    
+    // Execute all tools in parallel
+    const executionPromises = toolCalls.map(async (toolCall) => {
+      const result = await executeTool(toolCall);
+      if (result.success) {
+        results[toolCall.name] = result.result;
+      } else {
+        errors[toolCall.name] = result.error || 'Unknown error';
+      }
+      return result;
+    });
+
+    await Promise.all(executionPromises);
+
+    const success = Object.keys(errors).length === 0;
+    return { success, results, errors };
   };
 
   const handleRecursiveToolCalling = async (
@@ -256,8 +278,17 @@ function App() {
   ): Promise<string> => {
     const currentMessages = [...initialMessages];
     let iteration = 0;
+    setIsCancelled(false);
+    setIsInterruptible(true);
 
     while (iteration < maxIterations) {
+      // Check if the request was cancelled
+      if (isCancelled) {
+        logger.info('LLM request was cancelled, stopping execution');
+        setIsInterruptible(false);
+        return 'Request cancelled by user.';
+      }
+      
       iteration++;
       logger.info(`Starting recursive LLM call iteration ${iteration}`);
 
@@ -278,6 +309,11 @@ function App() {
       }
 
       await invokeLLMWithStream(provider, request, async chunk => {
+        // Check if the request was cancelled during streaming
+        if (isCancelled) {
+          throw new Error('Request cancelled');
+        }
+        
         try {
           buffer += chunk;
           const lines = buffer.split('\n');
@@ -286,6 +322,11 @@ function App() {
           buffer = lines.pop() || '';
 
           for (const line of lines) {
+            // Check cancellation for each line
+            if (isCancelled) {
+              throw new Error('Request cancelled');
+            }
+            
             if (line.startsWith('data: ') && line !== 'data: [DONE]') {
               const data = JSON.parse(line.slice(6));
               const content = data.choices?.[0]?.delta?.content;
@@ -302,7 +343,11 @@ function App() {
             }
           }
         } catch (e) {
-          // Ignore parsing errors for streaming
+          // If cancelled, re-throw to break out of the streaming
+          if (isCancelled) {
+            throw new Error('Request cancelled');
+          }
+          // Ignore other parsing errors for streaming
         }
       });
 
@@ -323,37 +368,119 @@ function App() {
       const parsedResponse = parseToolCall(assistantResponse);
 
       if (parsedResponse?.action) {
-        logger.info(
-          `Tool call detected in iteration ${iteration}: ${
-            parsedResponse.action.name
-          } with params: ${JSON.stringify(parsedResponse.action.parameters)}`
-        );
+        if (Array.isArray(parsedResponse.action)) {
+          // Parallel tool execution
+          logger.info(
+            `Parallel tool calls detected in iteration ${iteration}: ${parsedResponse.action.map(tc => tc.name).join(', ')}`
+          );
 
-        // Execute the tool
-        const toolResult = await executeTool(parsedResponse.action);
-        setToolResults(prev => [...prev, toolResult]);
+          // Execute tools in parallel
+          const parallelExecution = await executeToolsParallel(parsedResponse.action);
+          
+          if (parallelExecution.success) {
+            // Add all successful tool results to conversation
+            let toolResultMessage = `Parallel tool execution completed successfully:\n\n`;
+            
+            Object.entries(parallelExecution.results).forEach(([toolName, result]) => {
+              setToolResults(prev => [...prev, result]);
+              logger.info(`Tool execution completed: ${toolName}`);
+              logger.info(
+                `Tool result: ${result.substring(0, 500)}${result.length > 500 ? '...' : ''}`
+              );
+              
+              toolResultMessage += `**${toolName}**:\n\`\`\`json\n${result}\n\`\`\`\n\n`;
+            });
 
-        logger.info(`Tool execution completed: ${parsedResponse.action.name}`);
-        logger.info(
-          `Tool result: ${toolResult.substring(0, 500)}${toolResult.length > 500 ? '...' : ''}`
-        );
+            if (conversationHistory) {
+              conversationHistory.addMessage('user', toolResultMessage);
+            }
+            currentMessages.push({ role: 'user', content: toolResultMessage });
+          } else {
+            // Some tools failed - pass errors back to LLM
+            let errorMessage = `Parallel tool execution completed with errors:\n\n`;
+            
+            Object.entries(parallelExecution.results).forEach(([toolName, result]) => {
+              errorMessage += `**${toolName}** (success):\n\`\`\`json\n${result}\n\`\`\`\n\n`;
+            });
+            
+            Object.entries(parallelExecution.errors).forEach(([toolName, error]) => {
+              logger.error(`Tool execution failed: ${toolName} - ${error}`);
+              errorMessage += `**${toolName}** (failed): ${error}\n\n`;
+            });
 
-        // Add tool result to conversation for next iteration (use user role for compatibility)
-        const toolResultMessage = `Tool execution result:\n\`\`\`json\n${toolResult}\n\`\`\``;
-        if (conversationHistory) {
-          conversationHistory.addMessage('user', toolResultMessage);
+            errorMessage += `Please analyze these errors and try again with corrected parameters. Focus on fixing the specific errors mentioned above.`;
+
+            if (conversationHistory) {
+              conversationHistory.addMessage('user', errorMessage);
+            }
+            currentMessages.push({ role: 'user', content: errorMessage });
+          }
+        } else {
+          // Single tool execution (original behavior)
+          logger.info(
+            `Tool call detected in iteration ${iteration}: ${
+              parsedResponse.action.name
+            } with params: ${JSON.stringify(parsedResponse.action.parameters)}`
+          );
+
+          // Execute the tool
+          const toolExecution = await executeTool(parsedResponse.action);
+          
+          if (toolExecution.success) {
+            setToolResults(prev => [...prev, toolExecution.result]);
+            logger.info(`Tool execution completed: ${parsedResponse.action.name}`);
+            logger.info(
+              `Tool result: ${toolExecution.result.substring(0, 500)}${toolExecution.result.length > 500 ? '...' : ''}`
+            );
+
+            // Add successful tool result to conversation for next iteration
+            const toolResultMessage = `Tool execution result:\n\`\`\`json\n${toolExecution.result}\n\`\`\``;
+            if (conversationHistory) {
+              conversationHistory.addMessage('user', toolResultMessage);
+            }
+            currentMessages.push({ role: 'user', content: toolResultMessage });
+          } else {
+            // Tool failed - pass error back to LLM for correction
+            logger.error(`Tool execution failed: ${parsedResponse.action.name} - ${toolExecution.error}`);
+            
+            const errorMessage = `Tool '${parsedResponse.action.name}' failed with error: ${toolExecution.error}
+
+Please analyze this error and try again with the SAME tool using corrected parameters. Focus on:
+1. Fixing the specific error mentioned above
+2. Ensuring all required parameters are provided and correctly formatted
+3. Verifying file paths exist and are accessible (use absolute paths)
+4. Using appropriate parameter types (strings, numbers, booleans)
+5. Double-checking parameter names and values match the tool's schema
+${toolExecution.error?.includes('timed out') ? '6. The operation timed out - try breaking it into smaller, simpler steps or reducing the scope of changes' : ''}
+
+Try the '${parsedResponse.action.name}' tool again with corrected parameters. Only use a different tool if the current tool is fundamentally unsuitable for this task.
+
+Original failed tool call: ${parsedResponse.action.name} with parameters: ${JSON.stringify(parsedResponse.action.parameters, null, 2)}`;
+
+            if (conversationHistory) {
+              conversationHistory.addMessage('user', errorMessage);
+            }
+            currentMessages.push({ role: 'user', content: errorMessage });
+          }
         }
-        currentMessages.push({ role: 'user', content: toolResultMessage });
 
+        // Check cancellation before next iteration
+        if (isCancelled) {
+          logger.info('LLM request was cancelled, stopping execution');
+          setIsInterruptible(false);
+          return 'Request cancelled by user.';
+        }
         logger.info(`Continuing to next iteration for additional tool calls`);
       } else {
         // No tool call detected - this is the final response
         logger.info(`No tool call detected in iteration ${iteration} - ending recursion`);
+        setIsInterruptible(false);
         return assistantResponse;
       }
     }
 
     logger.warn(`Reached maximum iteration limit of ${maxIterations}`);
+    setIsInterruptible(false);
     return 'Maximum iteration limit reached. Please try a more specific query.';
   };
 
@@ -401,6 +528,7 @@ The MAGNUS.md should be in root directory and formatted in markdown. Focus on cl
     } finally {
       setIsLoading(false);
       setIsInitializing(false);
+      setIsInterruptible(false);
     }
   };
 
@@ -448,6 +576,7 @@ The MAGNUS.md should be in root directory and formatted in markdown. Focus on cl
       setError(errorMessage);
     } finally {
       setIsLoading(false);
+      setIsInterruptible(false);
       logger.info('Request processing completed');
     }
   };
@@ -544,6 +673,9 @@ The MAGNUS.md should be in root directory and formatted in markdown. Focus on cl
           {isLoading && !isInitializing && (
             <Box>
               <Text color="yellow">Processing...</Text>
+              {isInterruptible && (
+                <Text color="gray"> (Press ESC to cancel)</Text>
+              )}
             </Box>
           )}
           {!isLoading && (

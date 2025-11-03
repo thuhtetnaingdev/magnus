@@ -21,6 +21,9 @@ const AiderParametersSchema = z.object({
     .string()
     .optional()
     .describe('OpenAI-compatible model to use (defaults to OPENAI_MODEL from env)'),
+  editFormat: z
+    .enum(['diff', 'whole'])
+    .describe('Edit format mode: "diff" for patch-style edits, "whole" for full file replacement. Use "whole" if aider fails multiple times with "diff" mode.'),
 });
 
 export type AiderParameters = z.infer<typeof AiderParametersSchema>;
@@ -32,7 +35,8 @@ export interface AiderTool extends ToolDefinition<typeof AiderParametersSchema> 
 function executeAiderCommand(
   instruction: string,
   files: string[],
-  model?: string
+  model?: string,
+  editFormat?: 'diff' | 'whole'
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     try {
@@ -47,8 +51,15 @@ function executeAiderCommand(
         model || 'openai/' + env.OPENAI_MODEL,
         '--message',
         instruction,
-        ...files,
       ];
+
+      // Add edit format parameter if specified
+      if (editFormat) {
+        args.push('--edit-format', editFormat);
+      }
+
+      // Add files at the end
+      args.push(...files);
 
       // Set environment variables for OpenAI
       const envVars = {
@@ -85,13 +96,13 @@ function executeAiderCommand(
         reject(new Error(`Failed to start aider process: ${error.message}`));
       });
 
-      // Set a timeout for the aider process (10 minutes)
+      // Set a timeout for the aider process (3 minutes)
       const timeout = setTimeout(
         () => {
           aiderProcess.kill();
-          reject(new Error('Aider process timed out after 10 minutes'));
+          reject(new Error('Aider process timed out after 3 minutes'));
         },
-        10 * 60 * 1000
+        3 * 60 * 1000
       );
 
       aiderProcess.on('close', () => {
@@ -106,11 +117,11 @@ function executeAiderCommand(
 export const aiderTool = createTool({
   name: 'aider' as const,
   description:
-    'Execute aider commands to edit code using AI. Uses OpenAI-compatible models for code generation and editing.',
+    'Execute aider commands to edit code using AI. Uses OpenAI-compatible models for code generation and editing. Edit format must be specified: "diff" for patch-style edits, "whole" for full file replacement. Use "whole" if aider fails multiple times with "diff" mode.',
   parameters: AiderParametersSchema,
-  execute: async ({ instruction, files, model }) => {
+  execute: async ({ instruction, files, model, editFormat }) => {
     try {
-      const result = await executeAiderCommand(instruction, files, model);
+      const result = await executeAiderCommand(instruction, files, model, editFormat);
       return {
         success: true,
         output: result,
