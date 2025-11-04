@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { render, Text, Box, useInput, useApp } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
@@ -16,6 +16,7 @@ import {
 import { toolRegistry } from './tools/tool.registry.js';
 import { getToolCallingSystemPrompt } from './prompts/system.tool-calling.js';
 import { ConversationHistory, type Message } from './llm/history.llm.js';
+import { ConversationUIState } from './ui/conversation-state.js';
 import logger from './utils/logger.js';
 import { z } from 'zod';
 
@@ -32,6 +33,7 @@ interface ParsedResponse {
 
 function App() {
   const [conversationHistory, setConversationHistory] = useState<ConversationHistory | null>(null);
+  const [conversationUIState, setConversationUIState] = useState<ConversationUIState | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [env, setEnv] = useState<any>(null);
@@ -42,6 +44,7 @@ function App() {
   const [isInitializing, setIsInitializing] = useState(false);
   const [isInterruptible, setIsInterruptible] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
+  const isCancelledRef = useRef(false);
   const { exit } = useApp();
 
   useInput((inputKey, key) => {
@@ -56,9 +59,28 @@ function App() {
       if (showModal) {
         setShowModal(false);
       } else if (isLoading && isInterruptible) {
-        // Cancel the current LLM request
-        setIsCancelled(true);
-        logger.info('LLM request cancelled by user');
+        // Cancel the current LLM request immediately
+        logger.info('User pressed ESC — cancelling stream...');
+        isCancelledRef.current = true;   // cancel flag reference
+        setIsCancelled(true);             // keep React state for UI update
+      }
+      return;
+    }
+
+    // Clear UI state with Ctrl+K (only when modal is not open)
+    if (!showModal && key.ctrl && inputKey.toLowerCase() === 'k') {
+      if (conversationUIState && conversationHistory) {
+        // Clear both UI state and LLM history independently
+        conversationUIState.clear();
+        conversationHistory.clear();
+
+        // Re-add only the system prompt to LLM history
+        const systemPrompt = getToolCallingSystemPrompt(process.cwd(), process.platform);
+        conversationHistory.addSystemMessage(systemPrompt);
+
+        // Don't sync UI state - keep it separate to reduce memory
+        updateHistoryVersion();
+        logger.info('Conversation cleared - both UI and LLM history reset');
       }
       return;
     }
@@ -79,6 +101,10 @@ function App() {
         getToolCallingSystemPrompt(process.cwd(), process.platform)
       );
       setConversationHistory(history);
+
+      // Initialize UI conversation state
+      const uiState = new ConversationUIState();
+      setConversationUIState(uiState);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       logger.error(`Environment loading failed: ${errorMessage}`);
@@ -97,71 +123,53 @@ function App() {
       result.thinking = thinkingMatch[1];
     }
 
-    // Try to find XML tool calls in ACTION section
+    // Try to find JSON tool calls in ACTION section
     if (actionMatch) {
       const actionContent = actionMatch[1];
-      // Find ALL tool calls
-      const xmlMatches = [...actionContent.matchAll(/<([\w*]+)>[\s\S]*?<\/\1>/g)];
-      
-      if (xmlMatches.length > 0) {
-        const toolCalls: ToolCall[] = [];
-        
-        for (const match of xmlMatches) {
-          const toolCallText = match[0];
-          try {
-            // Extract tool name from opening tag
-            const toolNameMatch = toolCallText.match(/<(\*?[\w]+)>/);
-            if (!toolNameMatch) {
-              logger.warn(`Could not extract tool name from: ${toolCallText}`);
-              continue;
+
+      try {
+        // Try to parse the entire ACTION section as JSON
+        const parsedJSON = JSON.parse(actionContent.trim());
+
+        if (Array.isArray(parsedJSON)) {
+          // Multiple tool calls in array
+          const toolCalls: ToolCall[] = [];
+
+          for (const toolObj of parsedJSON) {
+            if (
+              typeof toolObj === 'object' &&
+              toolObj !== null &&
+              'name' in toolObj &&
+              'parameters' in toolObj
+            ) {
+              toolCalls.push({
+                name: toolObj.name,
+                parameters: toolObj.parameters,
+              });
             }
-
-            const toolName = toolNameMatch[1];
-            const parameters: any = {};
-
-            // Extract parameters from the current tool call
-            const toolStart = toolCallText.indexOf(`<${toolName}>`);
-            const toolEnd = toolCallText.indexOf(`</${toolName}>`);
-
-            if (toolStart !== -1 && toolEnd !== -1) {
-              const toolContent = toolCallText.substring(toolStart + `<${toolName}>`.length, toolEnd);
-
-              // Extract parameter values from this tool's content
-              const paramMatches = toolContent.matchAll(/<(\w+)>([\s\S]*?)<\/\1>/g);
-              for (const paramMatch of paramMatches) {
-                const paramName = paramMatch[1];
-                const paramValue = paramMatch[2].trim();
-                
-                // Handle multiple parameters with same name by collecting into array
-                if (parameters[paramName]) {
-                  if (Array.isArray(parameters[paramName])) {
-                    parameters[paramName].push(paramValue);
-                  } else {
-                    // Convert existing single value to array
-                    parameters[paramName] = [parameters[paramName], paramValue];
-                  }
-                } else {
-                  parameters[paramName] = paramValue;
-                }
-              }
-            }
-
-            toolCalls.push({
-              name: toolName,
-              parameters: parameters,
-            });
-
-            logger.debug(`Successfully parsed tool call: ${toolName}`);
-          } catch (e) {
-            logger.warn(`Failed to parse XML tool call: ${toolCallText}`);
           }
+
+          if (toolCalls.length === 1) {
+            result.action = toolCalls[0];
+          } else if (toolCalls.length > 1) {
+            result.action = toolCalls;
+          }
+        } else if (
+          typeof parsedJSON === 'object' &&
+          parsedJSON !== null &&
+          'name' in parsedJSON &&
+          'parameters' in parsedJSON
+        ) {
+          // Single tool call
+          result.action = {
+            name: parsedJSON.name,
+            parameters: parsedJSON.parameters,
+          };
         }
 
-        if (toolCalls.length === 1) {
-          result.action = toolCalls[0];
-        } else if (toolCalls.length > 1) {
-          result.action = toolCalls;
-        }
+        logger.debug(`Successfully parsed JSON tool call(s)`);
+      } catch (e) {
+        logger.warn(`Failed to parse JSON tool call: ${actionContent}`);
       }
     }
 
@@ -203,6 +211,30 @@ function App() {
               return lowerValue === 'true' || lowerValue === '1';
             };
             result[key] = Array.isArray(value) ? value.map(convertBoolean) : convertBoolean(value);
+          } else if (actualSchema._def && actualSchema._def.typeName === 'ZodArray') {
+            // Handle array types - parse JSON strings or use existing arrays
+            // This handles cases where LLM sends array parameters as JSON strings
+            // Example: dependencies="[\"dep1\", \"dep2\"]" instead of multiple <dependencies> elements
+            if (typeof value === 'string') {
+              try {
+                // Try to parse as JSON array
+                const parsed = JSON.parse(value);
+                if (Array.isArray(parsed)) {
+                  result[key] = parsed;
+                } else {
+                  // If not a valid JSON array, treat as single element array
+                  result[key] = [value];
+                }
+              } catch {
+                // If JSON parsing fails, treat as single element array
+                result[key] = [value];
+              }
+            } else if (Array.isArray(value)) {
+              result[key] = value;
+            } else {
+              // Convert single value to array
+              result[key] = [value];
+            }
           } else {
             // Keep as string for other types
             result[key] = value;
@@ -220,10 +252,15 @@ function App() {
     return result;
   };
 
-  const executeTool = async (toolCall: ToolCall): Promise<{ success: boolean; result: string; error?: string }> => {
+  const executeTool = async (
+    toolCall: ToolCall
+  ): Promise<{ success: boolean; result: string; error?: string }> => {
     const tool = toolRegistry.getTool(toolCall.name);
     if (!tool) {
-      const error = `Tool '${toolCall.name}' not found. Available tools: ${toolRegistry.getAllTools().map(t => t.name).join(', ')}`;
+      const error = `Tool '${toolCall.name}' not found. Available tools: ${toolRegistry
+        .getAllTools()
+        .map(t => t.name)
+        .join(', ')}`;
       logger.error(error);
       return { success: false, result: '', error };
     }
@@ -250,12 +287,18 @@ function App() {
     }
   };
 
-  const executeToolsParallel = async (toolCalls: ToolCall[]): Promise<{ success: boolean; results: { [key: string]: string }; errors: { [key: string]: string } }> => {
+  const executeToolsParallel = async (
+    toolCalls: ToolCall[]
+  ): Promise<{
+    success: boolean;
+    results: { [key: string]: string };
+    errors: { [key: string]: string };
+  }> => {
     const results: { [key: string]: string } = {};
     const errors: { [key: string]: string } = {};
-    
+
     // Execute all tools in parallel
-    const executionPromises = toolCalls.map(async (toolCall) => {
+    const executionPromises = toolCalls.map(async toolCall => {
       const result = await executeTool(toolCall);
       if (result.success) {
         results[toolCall.name] = result.result;
@@ -278,17 +321,18 @@ function App() {
   ): Promise<string> => {
     const currentMessages = [...initialMessages];
     let iteration = 0;
+    isCancelledRef.current = false;
     setIsCancelled(false);
     setIsInterruptible(true);
 
     while (iteration < maxIterations) {
       // Check if the request was cancelled
-      if (isCancelled) {
+      if (isCancelledRef.current) {
         logger.info('LLM request was cancelled, stopping execution');
         setIsInterruptible(false);
         return 'Request cancelled by user.';
       }
-      
+
       iteration++;
       logger.info(`Starting recursive LLM call iteration ${iteration}`);
 
@@ -308,48 +352,59 @@ function App() {
         conversationHistory.startAppendToken();
       }
 
-      await invokeLLMWithStream(provider, request, async chunk => {
-        // Check if the request was cancelled during streaming
-        if (isCancelled) {
-          throw new Error('Request cancelled');
-        }
-        
-        try {
-          buffer += chunk;
-          const lines = buffer.split('\n');
+      try {
+        await invokeLLMWithStream(
+          provider,
+          request,
+          async chunk => {
+            try {
+              buffer += chunk;
+              const lines = buffer.split('\n');
 
-          // Keep the last incomplete line in buffer
-          buffer = lines.pop() || '';
+              // Keep the last incomplete line in buffer
+              buffer = lines.pop() || '';
 
-          for (const line of lines) {
-            // Check cancellation for each line
-            if (isCancelled) {
-              throw new Error('Request cancelled');
-            }
-            
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-              const data = JSON.parse(line.slice(6));
-              const content = data.choices?.[0]?.delta?.content;
-              if (content) {
-                assistantResponse += content;
+              for (const line of lines) {
+                if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                  const data = JSON.parse(line.slice(6));
+                  const content = data.choices?.[0]?.delta?.content;
+                  if (content) {
+                    assistantResponse += content;
 
-                // Append token to conversation history
-                if (conversationHistory) {
-                  conversationHistory.appendToken(content);
-                  // Trigger UI update for real-time rendering
-                  updateHistoryVersion();
+                    // Append token to conversation history
+                    if (conversationHistory) {
+                      conversationHistory.appendToken(content);
+
+                      // Update UI state for real-time rendering (limited to recent messages)
+                      if (conversationUIState) {
+                        const lastMessage = conversationUIState.getLastMessage();
+                        if (lastMessage && lastMessage.role === 'assistant') {
+                          // Update existing assistant message in UI
+                          lastMessage.content += content;
+                        } else {
+                          // Add new assistant message to UI
+                          conversationUIState.addMessage('assistant', content);
+                        }
+                        updateHistoryVersion();
+                      }
+                    }
+                  }
                 }
               }
+            } catch (e) {
+              // Ignore parsing errors for streaming
             }
-          }
-        } catch (e) {
-          // If cancelled, re-throw to break out of the streaming
-          if (isCancelled) {
-            throw new Error('Request cancelled');
-          }
-          // Ignore other parsing errors for streaming
+          },
+          () => isCancelledRef.current
+        );
+      } catch (e) {
+        if (isCancelledRef.current) {
+          logger.info('LLM request was cancelled during streaming');
+          setIsInterruptible(false);
+          return 'Request cancelled by user.';
         }
-      });
+        throw e;
+      }
 
       logger.info(`LLM response received in iteration ${iteration}`);
       logger.debug(`Assistant response: ${assistantResponse}`);
@@ -376,33 +431,41 @@ function App() {
 
           // Execute tools in parallel
           const parallelExecution = await executeToolsParallel(parsedResponse.action);
-          
+
           if (parallelExecution.success) {
             // Add all successful tool results to conversation
             let toolResultMessage = `Parallel tool execution completed successfully:\n\n`;
-            
+
             Object.entries(parallelExecution.results).forEach(([toolName, result]) => {
               setToolResults(prev => [...prev, result]);
               logger.info(`Tool execution completed: ${toolName}`);
               logger.info(
                 `Tool result: ${result.substring(0, 500)}${result.length > 500 ? '...' : ''}`
               );
-              
+
               toolResultMessage += `**${toolName}**:\n\`\`\`json\n${result}\n\`\`\`\n\n`;
             });
 
             if (conversationHistory) {
-              conversationHistory.addMessage('user', toolResultMessage);
+              await conversationHistory.addMessageWithSummarization('user', toolResultMessage);
+            }
+            // Update UI state
+            if (conversationUIState) {
+              conversationUIState.addMessage('user', toolResultMessage);
+            }
+            // Update UI state
+            if (conversationUIState) {
+              conversationUIState.addMessage('user', toolResultMessage);
             }
             currentMessages.push({ role: 'user', content: toolResultMessage });
           } else {
             // Some tools failed - pass errors back to LLM
             let errorMessage = `Parallel tool execution completed with errors:\n\n`;
-            
+
             Object.entries(parallelExecution.results).forEach(([toolName, result]) => {
               errorMessage += `**${toolName}** (success):\n\`\`\`json\n${result}\n\`\`\`\n\n`;
             });
-            
+
             Object.entries(parallelExecution.errors).forEach(([toolName, error]) => {
               logger.error(`Tool execution failed: ${toolName} - ${error}`);
               errorMessage += `**${toolName}** (failed): ${error}\n\n`;
@@ -411,7 +474,15 @@ function App() {
             errorMessage += `Please analyze these errors and try again with corrected parameters. Focus on fixing the specific errors mentioned above.`;
 
             if (conversationHistory) {
-              conversationHistory.addMessage('user', errorMessage);
+              await conversationHistory.addMessageWithSummarization('user', errorMessage);
+            }
+            // Update UI state
+            if (conversationUIState) {
+              conversationUIState.addMessage('user', errorMessage);
+            }
+            // Update UI state
+            if (conversationUIState) {
+              conversationUIState.addMessage('user', errorMessage);
             }
             currentMessages.push({ role: 'user', content: errorMessage });
           }
@@ -425,7 +496,7 @@ function App() {
 
           // Execute the tool
           const toolExecution = await executeTool(parsedResponse.action);
-          
+
           if (toolExecution.success) {
             setToolResults(prev => [...prev, toolExecution.result]);
             logger.info(`Tool execution completed: ${parsedResponse.action.name}`);
@@ -436,13 +507,15 @@ function App() {
             // Add successful tool result to conversation for next iteration
             const toolResultMessage = `Tool execution result:\n\`\`\`json\n${toolExecution.result}\n\`\`\``;
             if (conversationHistory) {
-              conversationHistory.addMessage('user', toolResultMessage);
+              await conversationHistory.addMessageWithSummarization('user', toolResultMessage);
             }
             currentMessages.push({ role: 'user', content: toolResultMessage });
           } else {
             // Tool failed - pass error back to LLM for correction
-            logger.error(`Tool execution failed: ${parsedResponse.action.name} - ${toolExecution.error}`);
-            
+            logger.error(
+              `Tool execution failed: ${parsedResponse.action.name} - ${toolExecution.error}`
+            );
+
             const errorMessage = `Tool '${parsedResponse.action.name}' failed with error: ${toolExecution.error}
 
 Please analyze this error and try again with the SAME tool using corrected parameters. Focus on:
@@ -458,14 +531,14 @@ Try the '${parsedResponse.action.name}' tool again with corrected parameters. On
 Original failed tool call: ${parsedResponse.action.name} with parameters: ${JSON.stringify(parsedResponse.action.parameters, null, 2)}`;
 
             if (conversationHistory) {
-              conversationHistory.addMessage('user', errorMessage);
+              await conversationHistory.addMessageWithSummarization('user', errorMessage);
             }
             currentMessages.push({ role: 'user', content: errorMessage });
           }
         }
 
         // Check cancellation before next iteration
-        if (isCancelled) {
+        if (isCancelledRef.current) {
           logger.info('LLM request was cancelled, stopping execution');
           setIsInterruptible(false);
           return 'Request cancelled by user.';
@@ -474,12 +547,14 @@ Original failed tool call: ${parsedResponse.action.name} with parameters: ${JSON
       } else {
         // No tool call detected - this is the final response
         logger.info(`No tool call detected in iteration ${iteration} - ending recursion`);
+        isCancelledRef.current = false;
         setIsInterruptible(false);
         return assistantResponse;
       }
     }
 
     logger.warn(`Reached maximum iteration limit of ${maxIterations}`);
+    isCancelledRef.current = false;
     setIsInterruptible(false);
     return 'Maximum iteration limit reached. Please try a more specific query.';
   };
@@ -496,31 +571,15 @@ Original failed tool call: ${parsedResponse.action.name} with parameters: ${JSON
     setIsInitializing(true);
 
     try {
-      // Add a system message to guide the initialization process
-      const initializationPrompt = `Please initialize this project by:
-1. Using the tree tool to get the project structure
-2. Using the read tool to examine key files like package.json, README.md, etc.
-3. Using the glob tool to find relevant files
-4. Creating a comprehensive MAGNUS.md file that documents:
-   - Project overview and purpose
-   - Directory structure
-   - Key files and their purposes
-   - Available tools and their usage
-   - How to run and build the project
-
-The MAGNUS.md should be in root directory and formatted in markdown. Focus on clarity and usefulness for new developers. ./MAGNUS.md`;
-
-      // Add the initialization request to conversation history
-      conversationHistory.addMessage('user', initializationPrompt);
-      updateHistoryVersion();
-
-      const provider: LLMProvider = {
-        apiUrl: `${env.OPENAI_API_BASE}/chat/completions`,
-        apiKey: env.OPENAI_API_KEY,
-      };
-
-      // Start recursive tool calling process to initialize the project
-      await handleRecursiveToolCalling(provider, conversationHistory.getHistoryForLLM());
+      const { handleInitializeProject: initializeProject } = await import(
+        './initialization/project-initializer.js'
+      );
+      await initializeProject(
+        conversationHistory,
+        env,
+        updateHistoryVersion,
+        handleRecursiveToolCalling
+      );
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to initialize project';
       logger.error(`Project initialization error: ${errorMessage}`);
@@ -535,6 +594,7 @@ The MAGNUS.md should be in root directory and formatted in markdown. Focus on cl
   const handleModalSelect = (item: { label: string; value: string }) => {
     if (item.value === 'clear') {
       conversationHistory?.clear();
+      conversationUIState?.clear();
       setToolResults([]);
       updateHistoryVersion();
     } else if (item.value === 'initialize') {
@@ -557,7 +617,13 @@ The MAGNUS.md should be in root directory and formatted in markdown. Focus on cl
       return;
     }
 
-    conversationHistory.addMessage('user', currentInput);
+    await conversationHistory.addMessageWithSummarization('user', currentInput);
+
+    // Update UI state
+    if (conversationUIState) {
+      conversationUIState.addMessage('user', currentInput);
+    }
+
     updateHistoryVersion();
     setInput('');
     setIsLoading(true);
@@ -634,35 +700,27 @@ The MAGNUS.md should be in root directory and formatted in markdown. Focus on cl
               <Text color="gray">Your AI assistant with tool access.</Text>
               <Text color="dim">Type your message and press Enter to begin.</Text>
             </Box>
-            {conversationHistory &&
-              conversationHistory
-                .getHistory()
-                .filter(
-                  message =>
-                    message.content.trim().length > 0 &&
-                    message.role !== 'system' &&
-                    !message.content.includes('Tool execution result:')
-                )
-                .map((message, index) => (
-                  <Box key={index} flexDirection="column" marginY={1}>
-                    <Box flexDirection="row">
-                      <Text color={message.role === 'assistant' ? 'magentaBright' : 'greenBright'}>
-                        {message.role === 'assistant' ? 'Assistant ▸' : 'You ▸'}
-                      </Text>
-                    </Box>
-                    <Box
-                      marginLeft={2}
-                      borderStyle="round"
-                      borderColor={message.role === 'assistant' ? 'gray' : 'green'}
-                    >
-                      {message.role === 'assistant' ? (
-                        <MarkdownViewer content={message.content} />
-                      ) : (
-                        <Text>{message.content}</Text>
-                      )}
-                    </Box>
+            {conversationUIState &&
+              conversationUIState.getDisplayMessages().map((message, index) => (
+                <Box key={index} flexDirection="column" marginY={1}>
+                  <Box flexDirection="row">
+                    <Text color={message.role === 'assistant' ? 'magentaBright' : 'greenBright'}>
+                      {message.role === 'assistant' ? 'Assistant ▸' : 'You ▸'}
+                    </Text>
                   </Box>
-                ))}
+                  <Box
+                    marginLeft={2}
+                    borderStyle="round"
+                    borderColor={message.role === 'assistant' ? 'gray' : 'green'}
+                  >
+                    {message.role === 'assistant' ? (
+                      <MarkdownViewer content={message.content} />
+                    ) : (
+                      <Text>{message.content}</Text>
+                    )}
+                  </Box>
+                </Box>
+              ))}
           </Box>
 
           {isInitializing && (
@@ -673,9 +731,7 @@ The MAGNUS.md should be in root directory and formatted in markdown. Focus on cl
           {isLoading && !isInitializing && (
             <Box>
               <Text color="yellow">Processing...</Text>
-              {isInterruptible && (
-                <Text color="gray"> (Press ESC to cancel)</Text>
-              )}
+              {isInterruptible && <Text color="gray"> (Press ESC to cancel)</Text>}
             </Box>
           )}
           {!isLoading && (

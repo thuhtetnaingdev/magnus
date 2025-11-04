@@ -83,6 +83,21 @@ src/
    - Supports large files with line limits and offsets
    - Returns formatted content with 1-based line numbers
 
+4. **task** - Create and confirm tasks before execution
+   - Parameters: `task` (required), `confirmation_required` (optional, default: true), `estimated_complexity` (optional, default: medium), `dependencies` (optional, default: [])
+   - Enables confirmation workflows for coding tasks
+   - Returns task object with ID for reference
+
+5. **task_confirm** - Confirm, reject, or modify pending tasks
+   - Parameters: `task_id` (required), `action` (required: confirm/reject/modify), `modifications` (optional, required for modify)
+   - Enables back-and-forth refinement of task requirements
+   - Returns confirmation status and next steps
+
+6. **task_list** - List tasks with filtering by status
+   - Parameters: `status` (optional, default: all), `limit` (optional, default: 20)
+   - Shows pending, confirmed, executing, and completed tasks
+   - Helps find task IDs and monitor task status
+
 ### Tool Calling Format
 
 Agents must follow this exact format:
@@ -424,6 +439,46 @@ export const myTool = createTool({
 <editFormat>diff</editFormat>
 </aider>
 ```
+
+### Aider Execution Strategy: One-Shot vs Iterative
+
+#### One-Shot Execution (Recommended for Efficiency)
+Use one-shot execution when the task is well-defined and you have comprehensive context from previous tool calls:
+
+**When to Use One-Shot:**
+- Task is straightforward and well-defined
+- All necessary reference files are identified
+- Changes involve multiple related files
+- Task complexity is moderate (not requiring step-by-step validation)
+- You have comprehensive context from previous tool calls
+
+**Benefits:**
+- Saves tokens by reducing back-and-forth
+- More efficient for multi-file changes
+- Better for related changes across files
+- Reduces context switching
+
+**One-Shot Examples:**
+- Creating a new component that follows existing patterns
+- Adding a feature that spans multiple files
+- Refactoring related functions across files
+- Implementing an API endpoint with validation and error handling
+
+#### Iterative Execution (Use When Needed)
+Use iterative execution when you need step-by-step validation or when the task is exploratory:
+
+**When to Use Iterative:**
+- Task is complex or exploratory
+- You need to verify intermediate results
+- Reference files are not yet identified
+- Task requires step-by-step validation
+- You're unsure about the exact approach
+
+#### Strategy Summary
+- **Default to one-shot** for well-defined multi-file tasks
+- **Use iterative** for exploratory or complex validation tasks
+- **Balance efficiency** with the need for validation
+- **Consider token usage** - one-shot saves significant tokens
 
 ### UI/UX
 

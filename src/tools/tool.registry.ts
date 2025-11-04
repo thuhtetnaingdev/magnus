@@ -4,6 +4,8 @@ import { readTool } from './read.tool.js';
 import { treeTool } from './tree.tool.js';
 import { aiderTool } from './aider.tool.js';
 import { cliTool } from './cli.tool.js';
+import { taskTool, taskConfirmationTool, taskListTool } from './task.tool.js';
+import { summarizeTool } from './summarize.tool.js';
 
 export type Tool =
   | typeof grepTool
@@ -11,7 +13,11 @@ export type Tool =
   | typeof readTool
   | typeof treeTool
   | typeof aiderTool
-  | typeof cliTool;
+  | typeof cliTool
+  | typeof taskTool
+  | typeof taskConfirmationTool
+  | typeof taskListTool
+  | typeof summarizeTool;
 
 export class ToolRegistry {
   private tools: Map<string, Tool> = new Map();
@@ -23,6 +29,10 @@ export class ToolRegistry {
     this.registerTool(treeTool);
     this.registerTool(aiderTool);
     this.registerTool(cliTool);
+    this.registerTool(taskTool);
+    this.registerTool(taskConfirmationTool);
+    this.registerTool(taskListTool);
+    this.registerTool(summarizeTool);
   }
 
   registerTool(tool: Tool): void {

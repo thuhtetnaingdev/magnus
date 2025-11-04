@@ -1,0 +1,53 @@
+- name: openai/zai-org/GLM-4.6
+  edit_format: diff
+  extra_params:
+    model: openai/zai-org/GLM-4.6
+    max_tokens: 72000
+
+- name: openai/zai-org/GLM-4.5-Air
+  edit_format: diff
+  extra_params:
+    model: openai/zai-org/GLM-4.5-Air
+    max_tokens: 92000
+
+- name: openai/Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8
+  edit_format: diff
+  extra_params:
+    model: openai/Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8
+    max_tokens: 92000
+
+- name: openai/deepseek-ai/DeepSeek-V3.2-Exp-thinking
+  edit_format: diff
+  extra_params:
+    model: openai/deepseek-ai/DeepSeek-V3.2-Exp
+    max_tokens: 92000
+    extra_body:
+      chat_template_kwargs:
+        thinking: true
+  accepts_settings:
+  - reasoning_effort
+
+- name: openai/deepseek-ai/DeepSeek-V3.2-Exp
+  edit_format: diff
+  extra_params:
+    model: openai/deepseek-ai/DeepSeek-V3.1-Terminus
+    max_tokens: 92000
+
+
+- name: openai/moonshotai/Kimi-K2-Instruct-0905
+  edit_format: whole
+  extra_params:
+    model: openai/moonshotai/Kimi-K2-Instruct-0905
+    max_tokens: 92000
+
+- name: openai/openai/gpt-oss-120b
+  edit_format: diff
+  extra_params:
+    model: openai/openai/gpt-oss-120b
+    max_tokens: 100000
+    reasoning_effort: high
+    extra_body:
+      chat_template_kwargs:
+        thinking: true
+  accepts_settings:
+  - reasoning_effort

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { spawn } from 'child_process';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { createTool, type ToolDefinition } from './tool.base.js';
 import { validateEnv } from '../env.js';
 
@@ -17,13 +19,25 @@ const AiderParametersSchema = z.object({
       return val || [];
     })
     .describe('File path(s) to focus on (can be string or array of strings)'),
+  reference_files: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform(val => {
+      if (typeof val === 'string') return [val];
+      return val || [];
+    })
+    .describe('Reference file path(s) for context (can be string or array of strings)'),
   model: z
     .string()
     .optional()
     .describe('OpenAI-compatible model to use (defaults to OPENAI_MODEL from env)'),
   editFormat: z
     .enum(['diff', 'whole'])
-    .describe('Edit format mode: "diff" for patch-style edits, "whole" for full file replacement. Use "whole" if aider fails multiple times with "diff" mode.'),
+    .describe('Edit format mode: "diff" for patch-style edits, "whole" for full file replacement. Use "whole" for large tasks or when aider fails multiple times with "diff" mode.'),
+  timeout: z
+    .number()
+    .optional()
+    .describe('Timeout in seconds (defaults to 600 for large tasks, 180 for small tasks)'),
 });
 
 export type AiderParameters = z.infer<typeof AiderParametersSchema>;
@@ -36,11 +50,16 @@ function executeAiderCommand(
   instruction: string,
   files: string[],
   model?: string,
-  editFormat?: 'diff' | 'whole'
+  editFormat?: 'diff' | 'whole',
+  timeoutSeconds?: number
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     try {
       const env = validateEnv();
+
+      // Determine timeout based on task complexity
+      const defaultTimeout = timeoutSeconds || (files.length > 5 || instruction.length > 1000 ? 600 : 180);
+      const timeoutMs = defaultTimeout * 1000;
 
       // Build the aider command
       const args = [
@@ -52,6 +71,21 @@ function executeAiderCommand(
         '--message',
         instruction,
       ];
+
+      // Check for .modal.setting.yml in current directory, then home directory
+      let modalSettingsPath: string | null = null;
+      const currentDirPath = join(process.cwd(), '.modal.setting.yml');
+      const homeDirPath = join(process.env.HOME || process.env.USERPROFILE || '', '.modal.setting.yml');
+      
+      if (existsSync(currentDirPath)) {
+        modalSettingsPath = currentDirPath;
+      } else if (homeDirPath && existsSync(homeDirPath)) {
+        modalSettingsPath = homeDirPath;
+      }
+      
+      if (modalSettingsPath) {
+        args.push('--model-metadata-file', modalSettingsPath);
+      }
 
       // Add edit format parameter if specified
       if (editFormat) {
@@ -96,13 +130,31 @@ function executeAiderCommand(
         reject(new Error(`Failed to start aider process: ${error.message}`));
       });
 
-      // Set a timeout for the aider process (3 minutes)
+      // Set a timeout for the aider process with enhanced error handling
       const timeout = setTimeout(
         () => {
-          aiderProcess.kill();
-          reject(new Error('Aider process timed out after 3 minutes'));
+          aiderProcess.kill('SIGTERM'); // Try graceful shutdown first
+          
+          // Force kill after 10 seconds if graceful shutdown fails
+          const forceKillTimeout = setTimeout(() => {
+            aiderProcess.kill('SIGKILL');
+          }, 10000);
+
+          aiderProcess.on('close', () => {
+            clearTimeout(forceKillTimeout);
+          });
+
+          const timeoutMessage = `Aider process timed out after ${defaultTimeout} seconds. `;
+          
+          if (files.length > 5) {
+            reject(new Error(timeoutMessage + 'Large task detected. Consider breaking into smaller tasks or using "whole" edit format.'));
+          } else if (instruction.length > 1000) {
+            reject(new Error(timeoutMessage + 'Long instruction detected. Consider simplifying the instruction or breaking into smaller tasks.'));
+          } else {
+            reject(new Error(timeoutMessage + 'The task may be too complex. Try using "whole" edit format or break into smaller tasks.'));
+          }
         },
-        3 * 60 * 1000
+        timeoutMs
       );
 
       aiderProcess.on('close', () => {
@@ -117,21 +169,46 @@ function executeAiderCommand(
 export const aiderTool = createTool({
   name: 'aider' as const,
   description:
-    'Execute aider commands to edit code using AI. Uses OpenAI-compatible models for code generation and editing. Edit format must be specified: "diff" for patch-style edits, "whole" for full file replacement. Use "whole" if aider fails multiple times with "diff" mode.',
+    'Execute aider commands to edit code using AI. Uses OpenAI-compatible models for code generation and editing. Edit format must be specified: "diff" for patch-style edits, "whole" for full file replacement. Use "whole" for large tasks or when aider fails multiple times with "diff" mode. Automatically adjusts timeout based on task complexity.',
   parameters: AiderParametersSchema,
-  execute: async ({ instruction, files, model, editFormat }) => {
+  execute: async ({ instruction, files, reference_files, model, editFormat, timeout }) => {
     try {
-      const result = await executeAiderCommand(instruction, files, model, editFormat);
+      // Combine files and reference_files, removing duplicates
+      const allFiles = Array.from(new Set([...files, ...reference_files]));
+      
+      // Auto-detect if this is a large task and adjust edit format if needed
+      let finalEditFormat = editFormat;
+      if (!editFormat) {
+        // Auto-select "whole" format for large tasks
+        if (allFiles.length > 5 || instruction.length > 1000) {
+          finalEditFormat = 'whole';
+        } else {
+          finalEditFormat = 'diff';
+        }
+      }
+      
+      const result = await executeAiderCommand(instruction, allFiles, model, finalEditFormat, timeout);
       return {
         success: true,
         output: result,
         message: 'Aider executed successfully',
+        metadata: {
+          filesProcessed: allFiles.length,
+          editFormat: finalEditFormat,
+          instructionLength: instruction.length,
+        }
       };
     } catch (error) {
       return {
         success: false,
         output: null,
         error: error instanceof Error ? error.message : 'Unknown error occurred',
+        suggestions: error instanceof Error && error.message.includes('timed out') ? [
+          'Try breaking the task into smaller, more focused changes',
+          'Use "whole" edit format for complex changes',
+          'Increase the timeout parameter for large tasks',
+          'Reduce the number of files being modified in a single call'
+        ] : []
       };
     }
   },

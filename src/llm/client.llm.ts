@@ -18,7 +18,11 @@ export interface LLMProvider {
   apiKey: string;
 }
 
-export async function invokeLLM(provider: LLMProvider, request: LLMRequest): Promise<Response> {
+export async function invokeLLM(
+  provider: LLMProvider, 
+  request: LLMRequest,
+  signal?: AbortSignal
+): Promise<Response> {
   logger.info(
     `Invoking LLM at ${provider.apiUrl} with model ${request.model} with env ${provider.apiKey}`
   );
@@ -32,6 +36,7 @@ export async function invokeLLM(provider: LLMProvider, request: LLMRequest): Pro
       ...request,
       stream: true,
     }),
+    signal,
   });
 
   if (!response.ok) {
@@ -51,27 +56,58 @@ export async function invokeLLM(provider: LLMProvider, request: LLMRequest): Pro
 export async function invokeLLMWithStream(
   provider: LLMProvider,
   request: LLMRequest,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  onCancel?: () => boolean
 ): Promise<void> {
-  const response = await invokeLLM(provider, request);
-
-  if (!response.body) {
-    throw new Error('Response body is null');
+  const controller = new AbortController();
+  
+  // Set up a listener to abort when cancellation is requested
+  let abortCheckInterval: NodeJS.Timeout | undefined;
+  if (onCancel) {
+    abortCheckInterval = setInterval(() => {
+      if (onCancel()) {
+        controller.abort();
+      }
+    }, 100); // Check every 100ms
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-
   try {
-    while (true) {
-      const { done, value } = await reader.read();
+    const response = await invokeLLM(provider, request, controller.signal);
 
-      if (done) break;
+    if (!response.body) {
+      throw new Error('Response body is null');
+    }
 
-      const chunk = decoder.decode(value, { stream: true });
-      onChunk(chunk);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    try {
+      while (true) {
+        // Check for cancellation before reading
+        if (onCancel && onCancel()) {
+          reader.cancel();
+          throw new Error('Request cancelled');
+        }
+
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        // Check for cancellation after reading
+        if (onCancel && onCancel()) {
+          reader.cancel();
+          throw new Error('Request cancelled');
+        }
+
+        const chunk = decoder.decode(value, { stream: true });
+        onChunk(chunk);
+      }
+    } finally {
+      reader.releaseLock();
     }
   } finally {
-    reader.releaseLock();
+    if (abortCheckInterval) {
+      clearInterval(abortCheckInterval);
+    }
   }
 }
