@@ -26,16 +26,19 @@ Magnus requires aider for its AI-powered code assistance features. Follow the of
 **Quick installation methods:**
 
 #### For Mac & Linux:
+
 ```bash
 curl -LsSf https://aider.chat/install.sh | sh
 ```
 
 #### For Windows:
+
 ```bash
 powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 | iex"
 ```
 
 #### Alternative installation with pip:
+
 ```bash
 python -m pip install aider-chat
 ```
@@ -53,39 +56,33 @@ cd magnus
 
 ```bash
 npm install
+npm run build
 ```
 
-3. Set up environment variables:
+3. Copy configuration files:
 
 ```bash
-cp .env.example .env
-# Edit .env and add your API keys
+cp .modal.settings.yml ~
+cp .env.example ~/.env
 ```
 
-### Environment Variables
+4. Set up environment variables:
+
+Edit the `.env` file in your home directory and add your API keys.
+
+5. Install the package globally:
+
+```bash
+npm i -g .
+```
+
+## Environment Variables
 
 Create a `.env` file in the root directory with:
 
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
 ```
-
-## Usage
-
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Install the package globally:
-   ```bash
-   npm i -g .
-   ```
-
-3. Run the application:
-   ```bash
-   magnus
-   ```
 
 ## Project Structure
 
