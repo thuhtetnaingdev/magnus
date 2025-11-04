@@ -42,7 +42,8 @@ export class ConversationUIState {
       message =>
         message.content.trim().length > 0 &&
         message.role !== 'system' &&
-        !message.content.includes('Tool execution result:')
+        !message.content.includes('Tool execution result:') &&
+        !message.content.includes('Parallel tool execution completed successfully')
     );
   }
 
