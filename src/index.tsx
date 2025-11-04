@@ -61,8 +61,8 @@ function App() {
       } else if (isLoading && isInterruptible) {
         // Cancel the current LLM request immediately
         logger.info('User pressed ESC — cancelling stream...');
-        isCancelledRef.current = true;   // cancel flag reference
-        setIsCancelled(true);             // keep React state for UI update
+        isCancelledRef.current = true; // cancel flag reference
+        setIsCancelled(true); // keep React state for UI update
       }
       return;
     }
@@ -72,14 +72,6 @@ function App() {
       if (conversationUIState && conversationHistory) {
         // Clear both UI state and LLM history independently
         conversationUIState.clear();
-        conversationHistory.clear();
-
-        // Re-add only the system prompt to LLM history
-        const systemPrompt = getToolCallingSystemPrompt(process.cwd(), process.platform);
-        conversationHistory.addSystemMessage(systemPrompt);
-
-        // Don't sync UI state - keep it separate to reduce memory
-        updateHistoryVersion();
         logger.info('Conversation cleared - both UI and LLM history reset');
       }
       return;
